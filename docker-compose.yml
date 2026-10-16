@@ -1,0 +1,77 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    environment:
+      # Append-only file: the graph survives restarts ("the night shift still knows everything").
+      REDIS_ARGS: "--appendonly yes --appendfsync everysec"
+      # Raise the default 1 s query timeout and queue size for load tests.
+      FALKORDB_ARGS: "MAX_QUEUED_QUERIES 200 TIMEOUT 10000 RESULTSET_SIZE 50000"
+    ports:
+      - "6379:6379"
+      - "3000:3000" # FalkorDB Browser, to show the raw graph
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FALKOR_HOST: falkordb
+      FALKOR_PORT: "6379"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  workers:
+    build: ./backend
+    command: ["python", "-m", "reliefnet.workers"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FALKOR_HOST: falkordb
+      FALKOR_PORT: "6379"
+    depends_on:
+      falkordb:
+        condition: service_healthy
+
+  telegram:
+    build: ./backend
+    command: ["python", "-m", "reliefnet.telegram_bot"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FALKOR_HOST: falkordb
+      FALKOR_PORT: "6379"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    profiles: ["telegram"]
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  falkordb-data:
+  uploads:

@@ -1,0 +1,12 @@
+.env
+.env.local
+frontend/.env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+backend/uploads/
+node_modules/
+frontend/dist/
+.claude/worktrees/
+*.tsbuildinfo
