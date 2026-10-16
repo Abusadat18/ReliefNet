@@ -12,9 +12,10 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from .. import embed, events, llm
-from ..db import now_ms, org_graph_name, query
+from .. import embed, events, llm, memory
+from ..db import now_ms
 from ..domain import LESSON_KINDS, NEEDS
+from ..models import Lesson
 from ..routing import road_names
 from .base import PeriodicAgent
 
@@ -66,33 +67,7 @@ class LearnerAgent(PeriodicAgent):
         self.interval_s = self.s.learner_interval_s
 
     async def evidence(self, org: str) -> dict:
-        g = org_graph_name(org)
-        since = now_ms() - WINDOW_MS
-        reports = await query(
-            g,
-            "MATCH (p:Report) WHERE p.at > $since AND p.status = 'flooded'"
-            " RETURN p.id AS id, p.road AS road, p.at AS at, p.team AS team, p.verified AS verified",
-            {"since": since}, readonly=True,
-        )
-        deliveries = await query(
-            g,
-            "MATCH (t:Team)-[:MADE]->(d:Delivery) WHERE d.at > $since"
-            " RETURN d.id AS id, t.name AS team, d.duration_min AS mins, d.needs AS needs",
-            {"since": since}, readonly=True,
-        )
-        wards = await query(
-            g,
-            "MATCH (f:Family) WHERE f.status <> 'SERVED' AND f.ward > 0"
-            " RETURN f.ward AS ward, count(f) AS unserved, min(f.first_seen) AS oldest, collect(f.id)[0..6] AS ids",
-            readonly=True,
-        )
-        observations = await query(
-            g,
-            "MATCH (o:Observation) WHERE o.at > $since AND size(o.text) > 12"
-            " RETURN o.id AS id, o.text AS text, o.at AS at ORDER BY o.at DESC LIMIT 25",
-            {"since": since}, readonly=True,
-        )
-        return {"reports": reports, "deliveries": deliveries, "wards": wards, "observations": observations}
+        return await memory.learner_evidence(org, since=now_ms() - WINDOW_MS)
 
     def rule_lessons(self, ev: dict) -> list[dict]:
         tz = self.s.tz_offset_minutes
@@ -139,8 +114,8 @@ class LearnerAgent(PeriodicAgent):
     async def llm_lessons(self, org: str, ev: dict) -> list[dict]:
         if not llm.is_live() or not (ev["observations"] or len(ev["reports"]) >= 2):
             return []
-        teams = await query(org_graph_name(org), "MATCH (t:Team) RETURN t.name AS n", readonly=True)
-        lines = ["Roads: " + ", ".join(await road_names()), "Teams: " + ", ".join(t["n"] for t in teams),
+        teams = await memory.team_names(org)
+        lines = ["Roads: " + ", ".join(await road_names()), "Teams: " + ", ".join(teams),
                  "Needs: " + ", ".join(NEEDS), "", "Evidence:"]
         tz = self.s.tz_offset_minutes
         for r in ev["reports"]:
@@ -155,52 +130,29 @@ class LearnerAgent(PeriodicAgent):
         return (out or {}).get("lessons", [])
 
     async def tick(self, org: str) -> None:
-        g = org_graph_name(org)
         ev = await self.evidence(org)
         proposals = self.rule_lessons(ev)
         rule_keys = {(p["kind"], p["target"], p["need"]) for p in proposals}
         for p in await self.llm_lessons(org, ev):
-            k = (p["kind"], p["target"], p.get("need") or "")
-            if k not in rule_keys:
-                p["by"] = "claude"
-                proposals.append(p)
-        now = now_ms()
+            if (p["kind"], p["target"], p.get("need") or "") not in rule_keys:
+                proposals.append({**p, "by": "claude"})
+
         touched = []
         for p in proposals:
-            key = f"{p['kind']}:{p['target']}:{p.get('need') or ''}".lower()
-            vec = await embed.embed_one(p["text"])
-            rows = await query(
-                g,
-                "MERGE (l:Lesson {key:$key})"
-                " ON CREATE SET l.kind=$kind, l.target=$target, l.need=$need, l.created_at=$now, l.seen=0,"
-                "   l.confidence=$conf, l.by=$by"
-                " WITH l, l.seen AS before"
-                " SET l.text=$text, l.after_hour=$after, l.updated_at=$now, l.seen = size($ev),"
-                "   l.confidence = CASE WHEN size($ev) > before"
-                "     THEN (CASE WHEN l.confidence + 0.1 > $conf THEN l.confidence + 0.1 ELSE $conf END)"
-                "     ELSE l.confidence END,"
-                "   l.embedding = vecf32($vec)"
-                " SET l.confidence = CASE WHEN l.confidence > 0.97 THEN 0.97 ELSE l.confidence END"
-                " WITH l, before"
-                " OPTIONAL MATCH (e) WHERE e.id IN $ev AND (e:Report OR e:Delivery OR e:Observation OR e:Family)"
-                " FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END | MERGE (l)-[:DERIVED_FROM]->(e))"
-                " RETURN DISTINCT l.key AS key, before, l.seen AS seen, l.confidence AS conf",
-                {"key": key, "kind": p["kind"], "target": p["target"], "need": p.get("need") or "",
-                 "after": p.get("after_hour", -1), "text": p["text"], "ev": p.get("evidence_ids") or [],
-                 "conf": float(p.get("confidence") or 0.5), "now": now, "by": p.get("by", "rules"), "vec": vec},
+            lesson = Lesson(
+                key=f"{p['kind']}:{p['target']}:{p.get('need') or ''}".lower(),
+                kind=p["kind"], target=p["target"], need=p.get("need") or "", after_hour=p.get("after_hour", -1),
+                text=p["text"], confidence=float(p.get("confidence") or 0.5), by=p.get("by", "rules"),
             )
-            touched.append(key)
-            if rows and rows[0]["before"] == 0:
+            saved = await memory.save_lesson(org, lesson, p.get("evidence_ids") or [],
+                                             await embed.embed_one(lesson.text))
+            touched.append(lesson.key)
+            if saved["before"] == 0:
                 await events.incr(org, "lessons")
-                await events.publish(org, "lesson", f"New lesson: {p['text']}", key=key, lesson_kind=p["kind"],
-                                     confidence=rows[0]["conf"])
-            elif rows and rows[0]["seen"] > rows[0]["before"]:
-                await events.publish(org, "lesson", f"Lesson reinforced: {p['text']}", key=key, lesson_kind=p["kind"],
-                                     confidence=rows[0]["conf"])
+                await events.publish(org, "lesson", f"New lesson: {lesson.text}", key=lesson.key,
+                                     lesson_kind=lesson.kind, confidence=saved["confidence"])
+            elif saved["seen"] > saved["before"]:
+                await events.publish(org, "lesson", f"Lesson reinforced: {lesson.text}", key=lesson.key,
+                                     lesson_kind=lesson.kind, confidence=saved["confidence"])
         # Lessons without fresh evidence lose confidence.
-        await query(
-            g,
-            "MATCH (l:Lesson) WHERE NOT l.key IN $touched"
-            " SET l.confidence = CASE WHEN l.confidence * $decay < 0.1 THEN 0.1 ELSE l.confidence * $decay END",
-            {"touched": touched, "decay": DECAY},
-        )
+        await memory.decay_lessons(org, touched, DECAY)

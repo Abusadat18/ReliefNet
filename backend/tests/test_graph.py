@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from reliefnet import db, field_ops, routing
+from reliefnet import db, field_ops, memory, routing
 from reliefnet.agents.base import Agent
 from reliefnet.db import org_graph_name, query
 from reliefnet.seed import seed_org, seed_region
@@ -38,19 +38,19 @@ async def test_parallel_claims_never_overlap(graph):
     await query(graph, "UNWIND range(1, 30) AS i CREATE (:Request {id:'T-' + toString(i), status:'TRIAGED', priority:i})")
     agents = [Probe(f"P-{i}") for i in range(30)]
     items = await asyncio.gather(*(a.claim(ORG) for a in agents))
-    ids = [i["id"] for i in items if i]
+    ids = [i.id for i in items if i]
     assert len(ids) == 30 and len(set(ids)) == 30
 
 
 async def test_expired_lease_is_reclaimed_and_old_owner_cannot_finish(graph):
     await query(graph, "CREATE (:Request {id:'T-1', status:'TRIAGED', priority:1})")
     a, b = Probe("P-a"), Probe("P-b")
-    assert (await a.claim(ORG))["id"] == "T-1"
+    assert (await a.claim(ORG)).id == "T-1"
     assert await b.claim(ORG) is None  # lease still valid
     await query(graph, "MATCH (r:Request {id:'T-1'}) SET r.lease_until = 0")  # simulate a crash
-    assert (await b.claim(ORG))["id"] == "T-1"
-    assert not await a.finish(ORG, "T-1", "ASSIGNED", {}, "late")
-    assert await b.finish(ORG, "T-1", "ASSIGNED", {}, "ok")
+    assert (await b.claim(ORG)).id == "T-1"
+    assert not await memory.finish_step(ORG, a.me, "T-1", "ASSIGNED", {}, "late")
+    assert await memory.finish_step(ORG, b.me, "T-1", "ASSIGNED", {}, "ok")
     n = await db.scalar(graph, "MATCH (:Request {id:'T-1'})-[p:PROCESSED_BY]->() RETURN count(p)")
     assert n == 2  # the reclaim and the finish are both on record
 

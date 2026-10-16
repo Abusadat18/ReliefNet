@@ -1,9 +1,10 @@
 """Agent 1 - Intake. Raw message -> structured Request (status NEW)."""
 from __future__ import annotations
 
-from .. import embed, events, field_ops, geo, llm
+from .. import embed, events, field_ops, geo, llm, memory
 from ..db import now_ms, redis
 from ..domain import NEEDS, URGENCY
+from ..models import Message, Request
 from ..parsing import parse_message
 from .base import Agent
 
@@ -64,6 +65,7 @@ Roads: {roads}
 class IntakeAgent(Agent):
     kind = "intake"
     label = "Message"
+    model = Message
     in_status = "RAW"
     order = "r.received_at ASC"
 
@@ -79,74 +81,72 @@ class IntakeAgent(Agent):
                 return out, "claude"
         return parse_message(text, await geo.landmark_names()), "rules"
 
-    async def process(self, org: str, msg: dict) -> None:
-        data, how = await self.extract(msg["text"])
+    async def process(self, org: str, msg: Message) -> None:
+        data, how = await self.extract(msg.text)
         kind = data["kind"]
+
         if kind == "road_report" and data.get("road_status"):
-            await self.finish(org, msg["id"], "PARSED", {"kind": kind, "parsed_by": how}, "road report")
+            self.done(await memory.finish_step(org, self.me, msg.id, "PARSED", {"kind": kind, "parsed_by": how},
+                                               "road report"), msg.id)
             await field_ops.report_road(
-                org, data.get("road_name") or msg["text"], data["road_status"],
-                reporter=f"public:{msg.get('channel', 'unknown')}", verified=False, source_text=msg["text"],
+                org, data.get("road_name") or msg.text, data["road_status"],
+                reporter=f"public:{msg.channel}", verified=False, source_text=msg.text,
             )
             return
+
         if kind != "help_request":
-            await self.finish(org, msg["id"], "IGNORED", {"kind": kind, "parsed_by": how}, f"not a help request ({kind})")
-            await events.publish(org, "ignored", f"{msg['id']} is not a help request ({kind})", id=msg["id"])
+            self.done(await memory.finish_step(org, self.me, msg.id, "IGNORED", {"kind": kind, "parsed_by": how},
+                                               f"not a help request ({kind})"), msg.id)
+            await events.publish(org, "ignored", f"{msg.id} is not a help request ({kind})", id=msg.id)
             return
 
+        request = await self.to_request(org, msg, data, how)
+        vector = await embed.embed_one(request.desc)
+        if self.done(await memory.create_request(org, self.me, msg.id, request, vector, how), msg.id):
+            await events.incr(org, "requests_created")
+            await events.publish(
+                org, "intake", f"{request.id}: {request.summary}", id=request.id, message=msg.id, lat=request.lat,
+                lon=request.lon, urgency=request.urgency, parsed_by=how,
+            )
+
+    async def to_request(self, org: str, msg: Message, data: dict, how: str) -> Request:
+        """Turn the extracted fields into a Request, with a resolved location."""
+        name = (data.get("contact_name") or "").strip()
         loc = await geo.resolve(
             data.get("landmark", ""), int(data.get("ward") or 0), data.get("location_text", ""),
-            seed=(data.get("contact_name") or "") + (data.get("landmark") or "") + str(data.get("ward")) + msg["id"],
+            seed=name + (data.get("landmark") or "") + str(data.get("ward")) + msg.id,
         )
         needs = [n for n in data.get("needs", []) if n in NEEDS] or ["food", "water"]
-        name = (data.get("contact_name") or "").strip()
+        # The embedding is built from the structured facts, so two different
+        # wordings of the same household land close together.
         desc = (
             f"{name + ' family. ' if name else ''}{data.get('people', 0)} people, {data.get('elderly', 0)} elderly, "
             f"{data.get('children', 0)} children. Needs {', '.join(needs)}. "
             f"{loc['landmark'] or data.get('location_text', '')}, ward {loc['ward']}. {data.get('summary_en', '')}"
         )
-        vec = await embed.embed_one(desc)
         seq = await redis().incr(f"rn:seq:{org}:R")
-        rid = f"R-{100 + seq}"
-        props = {
-            "id": rid,
-            "created_at": msg.get("received_at") or now_ms(),
-            "status": "NEW",
-            "channel": msg.get("channel", "unknown"),
-            "name": name,
-            "people": int(data.get("people") or 1),
-            "elderly": int(data.get("elderly") or 0),
-            "children": int(data.get("children") or 0),
-            "pregnant_or_disabled": int(data.get("pregnant_or_disabled") or 0),
-            "medical": data.get("medical_condition") or "",
-            "needs": needs,
-            "water_entering": bool(data.get("water_entering")),
-            "trapped": bool(data.get("trapped")),
-            "urgency": data.get("urgency") or "medium",
-            "ward": loc["ward"],
-            "landmark": loc["landmark"],
-            "location_text": data.get("location_text") or "",
-            "lat": loc["lat"],
-            "lon": loc["lon"],
-            "geo_confidence": loc["geo_confidence"],
-            "summary": data.get("summary_en") or desc,
-            "desc": desc,
-            "parsed_by": how,
-            "sim_household": msg.get("sim_household") or "",
-        }
-        ok = await self.finish(
-            org, msg["id"], "PARSED", {"kind": kind, "parsed_by": how}, f"extracted request {rid} ({how})",
-            extra_cypher=(
-                " CREATE (r)-[:BECAME {at:$now}]->(req:Request)"
-                " SET req = $req, req.loc = point({latitude:$req.lat, longitude:$req.lon}),"
-                " req.embedding = vecf32($vec)"
-                " CREATE (req)-[:PROCESSED_BY {at:$now, action:'intake', from:'', to:'NEW', reason:$why}]->(a)"
-            ),
-            extra_params={"req": props, "vec": vec, "why": f"created from {msg['id']} via {how}"},
+        return Request(
+            id=f"R-{100 + seq}",
+            created_at=msg.received_at or now_ms(),
+            channel=msg.channel,
+            name=name,
+            people=int(data.get("people") or 1),
+            elderly=int(data.get("elderly") or 0),
+            children=int(data.get("children") or 0),
+            pregnant_or_disabled=int(data.get("pregnant_or_disabled") or 0),
+            medical=data.get("medical_condition") or "",
+            needs=needs,
+            water_entering=bool(data.get("water_entering")),
+            trapped=bool(data.get("trapped")),
+            urgency=data.get("urgency") or "medium",
+            ward=loc["ward"],
+            landmark=loc["landmark"],
+            location_text=data.get("location_text") or "",
+            lat=loc["lat"],
+            lon=loc["lon"],
+            geo_confidence=loc["geo_confidence"],
+            summary=data.get("summary_en") or desc,
+            desc=desc,
+            parsed_by=how,
+            sim_household=msg.sim_household,
         )
-        if ok:
-            await events.incr(org, "requests_created")
-            await events.publish(
-                org, "intake", f"{rid}: {props['summary']}", id=rid, message=msg["id"], lat=props["lat"],
-                lon=props["lon"], urgency=props["urgency"], parsed_by=how,
-            )

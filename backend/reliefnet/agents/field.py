@@ -10,9 +10,9 @@ import re
 
 from rapidfuzz import fuzz
 
-from .. import events, field_ops, llm, routing
+from .. import events, field_ops, llm, memory, routing
 from ..config import get_settings
-from ..db import now_ms, org_graph_name, query, redis
+from ..db import now_ms, redis
 from ..domain import NEEDS
 
 TOOLS = [
@@ -146,13 +146,10 @@ class FieldSession:
             oid = await field_ops.add_observation(self.org, args["text"], by=self.v["id"], channel=self.channel)
             out = {"ok": True, "observation": oid}
         elif name == "nearest_shelters":
-            rows = await query(
-                org_graph_name(self.org), "MATCH (r:Request {id:$id}) RETURN r.lat AS lat, r.lon AS lon",
-                {"id": args["request_id"].upper()}, readonly=True,
-            )
-            if not rows:
+            where = await memory.request_location(self.org, args["request_id"].upper())
+            if not where:
                 return f"Unknown request {args['request_id']}"
-            out = await field_ops.nearest_shelters(rows[0]["lat"], rows[0]["lon"])
+            out = await field_ops.nearest_shelters(*where)
         elif name == "road_status":
             bad = {r["name"]: r["status"] for r in await routing.snapshot() if r["status"] != "open"}
             out = bad or "All roads are open."

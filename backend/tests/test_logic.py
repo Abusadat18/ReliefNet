@@ -2,6 +2,7 @@
 from reliefnet.agents.dedupe import score_pair
 from reliefnet.agents.triage import cluster_bonus, score
 from reliefnet.domain import coverage
+from reliefnet.models import Candidate, Family, Lesson, Request
 from reliefnet.parsing import parse_message
 from reliefnet.region_data import LANDMARKS, build_region
 
@@ -36,30 +37,37 @@ def test_unserved_cluster_message_is_help_request():
     assert d["kind"] == "help_request" and d["children"] == 3 and d["landmark"] == "Lane 4"
 
 
-def _req(**kw):
-    base = dict(lat=25.59, lon=85.12, ward=12, landmark="Shiv Mandir", people=5, elderly=0, children=0, name="")
-    return {**base, **kw}
+BASE = dict(lat=25.59, lon=85.12, ward=12, landmark="Shiv Mandir", people=5, elderly=0, children=0, name="")
+
+
+def _req(**kw) -> Request:
+    return Request(id="R-1", **{**BASE, **kw})
+
+
+def _cand(similarity: float, **kw) -> Candidate:
+    return Candidate(id="R-2", family="F-1", similarity=similarity, **{**BASE, **kw})
 
 
 def test_dedupe_merges_same_household_with_partial_details():
-    s, _ = score_pair(_req(elderly=1), _req(lat=25.5905, name="R. Kumar"), 0.9)
+    s, _ = score_pair(_req(elderly=1), _cand(0.9, lat=25.5905, name="R. Kumar"))
     assert s >= 0.78
 
 
 def test_dedupe_keeps_neighbours_apart():
-    s, ev = score_pair(_req(name="R. Kumar"), _req(lat=25.5902, people=3, children=2, name="Das"), 0.9)
+    s, ev = score_pair(_req(name="R. Kumar"), _cand(0.9, lat=25.5902, people=3, children=2, name="Das"))
     assert s < 0.3 and ev["conflicts"]
 
 
 def test_dedupe_ignores_far_requests():
-    s, _ = score_pair(_req(), _req(lat=25.61), 0.99)
+    s, _ = score_pair(_req(), _cand(0.99, lat=25.61))
     assert s == 0.0
 
 
 def test_triage_scores_medical_elderly_water_highest():
-    fam = {"first_seen": None}
-    hi, reasons, _ = score(dict(needs=["medicine"], medical="BP", elderly=1, water_entering=True, people=5), fam, None, [])
-    lo, _, _ = score(dict(needs=["food"], people=2), fam, None, [])
+    fam = Family(id="F-1")
+    hi, reasons, _ = score(Request(id="R-1", needs=["medicine"], medical="BP", elderly=1, water_entering=True,
+                                   people=5, geo_confidence="high"), fam, None, [])
+    lo, _, _ = score(Request(id="R-2", needs=["food"], people=2, geo_confidence="high"), fam, None, [])
     assert hi >= 70 > lo
     assert any("medical" in r for r in reasons)
 
@@ -70,9 +78,10 @@ def test_cluster_bonus_needs_several_unserved_households():
 
 
 def test_area_lesson_raises_priority():
-    req = dict(needs=["food"], people=2, ward=12)
-    base, _, _ = score(req, {}, None, [])
-    boosted, reasons, _ = score(req, {}, None, [{"target": "ward 12", "confidence": 0.8, "text": "Ward 12 hotspot"}])
+    req = Request(id="R-1", needs=["food"], people=2, ward=12)
+    lesson = Lesson(key="area_risk:ward 12:", kind="area_risk", target="ward 12", confidence=0.8, text="Ward 12 hotspot")
+    base, _, _ = score(req, None, None, [])
+    boosted, reasons, _ = score(req, None, None, [lesson])
     assert boosted > base and any("lesson" in r for r in reasons)
 
 
