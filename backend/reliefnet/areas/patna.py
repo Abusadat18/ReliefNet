@@ -16,6 +16,7 @@ from . import DrillScript, Junction, Region, Road, TeamBase, nearest_junction, w
 
 NAME = "patna"
 TITLE = "Rajendra Nagar and Kankarbagh, Patna"
+FICTIONAL = False
 # south, west, north, east
 BBOX = (25.585, 85.140, 25.618, 85.180)
 SNAPSHOT = Path(__file__).with_name("patna.json")

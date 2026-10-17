@@ -22,6 +22,7 @@ async def ingest_message(
     sender: str = "",
     received_at: int | None = None,
     sim_household: str = "",
+    extra: dict | None = None,
 ) -> str:
     seq = await redis().incr(f"rn:seq:{org}:M")
     mid = f"M-{1000 + seq}"
@@ -32,6 +33,10 @@ async def ingest_message(
         {"id": mid, "text": text[:2000], "channel": channel, "sender": sender,
          "at": received_at or now_ms(), "sim": sim_household},
     )
+    if extra:  # the bot's structured fields; empty values are left off the node
+        props = {k: v for k, v in extra.items() if v not in (None, "")}
+        if props:
+            await query(org_graph_name(org), "MATCH (m:Message {id:$id}) SET m += $props", {"id": mid, "props": props})
     await events.incr(org, "messages_in")
     await events.publish(org, "message", f"{mid} ({channel}): {text[:160]}", id=mid, channel=channel)
     return mid

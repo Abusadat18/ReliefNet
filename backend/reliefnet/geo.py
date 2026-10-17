@@ -11,7 +11,9 @@ import time
 
 from rapidfuzz import fuzz, process
 
+from .config import get_settings
 from .db import REGION_GRAPH, query
+from . import areas
 from .areas import haversine_m
 
 _cache: dict[str, tuple[float, object]] = {}
@@ -111,6 +113,52 @@ async def resolve(landmark: str, ward: int, location_text: str, seed: str) -> di
         return {"lat": w["lat"] + dlat, "lon": w["lon"] + dlon, "ward": ward, "landmark": "", "geo_confidence": "low"}
     center = wlist[len(wlist) // 2] if wlist else {"lat": 0.0, "lon": 0.0}
     return {"lat": center["lat"], "lon": center["lon"], "ward": 0, "landmark": "", "geo_confidence": "none"}
+
+
+TOWN_RADIUS_M = 8000.0  # a pin further than this from the town is not in the flood area
+
+
+def snap_pins() -> bool:
+    """Move far-away pins into the area? DEMO_SNAP_PINS decides; unset, only for a fictional area."""
+    setting = get_settings().demo_snap_pins
+    return setting if setting is not None else bool(getattr(areas.module(), "FICTIONAL", False))
+NEAR_LANDMARK_M = 250.0
+
+
+def _town_center(wlist: list[dict]) -> tuple[float, float]:
+    return sum(w["lat"] for w in wlist) / len(wlist), sum(w["lon"] for w in wlist) / len(wlist)
+
+
+def snap_point(wlist: list[dict], ward_hint: int, seed: str) -> dict:
+    """A stable, believable spot in the flood zone, for a pin that is not in the town.
+
+    In a fictional area, a phone sharing its real GPS from anywhere else would otherwise
+    put a request outside the map (see `snap_pins`). The ward is the one the person picked, or one chosen from
+    `seed`. The same seed always gives the same spot. Marked low confidence, so Triage asks
+    for a call back."""
+    ward = next((w for w in wlist if w["num"] == ward_hint), None) or wlist[
+        int(hashlib.sha1(seed.encode()).hexdigest(), 16) % len(wlist)
+    ]
+    dlat, dlon = _jitter(seed, 220.0)
+    return {"lat": ward["lat"] + dlat, "lon": ward["lon"] + dlon, "ward": ward["num"], "landmark": "",
+            "geo_confidence": "low", "snapped": True}
+
+
+async def from_pin(lat: float, lon: float, ward_hint: int = 0, seed: str = "") -> dict | None:
+    """Location from a shared pin. A pin outside the town is snapped into it (see `snap_point`),
+    or returns None when DEMO_SNAP_PINS is off and the caller falls back to ward and landmark."""
+    wlist = await wards()
+    if wlist:
+        clat, clon = _town_center(wlist)
+        if haversine_m(lat, lon, clat, clon) > TOWN_RADIUS_M:
+            return snap_point(wlist, ward_hint, seed or f"{lat:.4f},{lon:.4f}") if snap_pins() else None
+    near, best = "", NEAR_LANDMARK_M
+    for l in await landmarks():
+        d = haversine_m(lat, lon, l["lat"], l["lon"])
+        if d < best:
+            near, best = l["name"], d
+    return {"lat": lat, "lon": lon, "ward": await ward_at(lat, lon) or ward_hint, "landmark": near,
+            "geo_confidence": "high"}
 
 
 async def nearest_junction(lat: float, lon: float) -> str:

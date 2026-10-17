@@ -262,7 +262,7 @@ The Docker image includes Anthropic, OpenAI and Ollama. The prompts were written
 
 The Telegram bot has two kinds of users:
 
-- **The public** writes to the bot to ask for help. Each message becomes an `M-` message, and the bot replies with its reference number. By default, public messages go to the first organisation by slug (`local_ngo` with the demo data). Send `/org redcross` to choose another one.
+- **The public** sends `/start` and answers a few short questions with buttons: location, the family's phone number, how many people and what they need. Each finished form becomes an `M-` message, and the bot replies with its reference number. Plain text without `/start` is still accepted. Public requests go to the organisation in `TELEGRAM_DEFAULT_ORG`. Send `/org redcross` to choose another one for one chat.
 - **Volunteers** link their account once. Then they chat with the Field agent (deliveries, road reports, photos, locations) and receive a message for each new assignment to their team.
 
 To set it up:
@@ -292,6 +292,8 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with all of Google's places. It enables the **Clean / Detailed** switch on the map. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
+| `TELEGRAM_DEFAULT_ORG` | first by slug | Organisation that receives public Telegram requests |
+| `DEMO_SNAP_PINS` | empty | Move a shared pin from far outside the area to a random spot inside it. Empty: only for the fictional `ganga_nagar`. |
 
 ## Repository layout
 
@@ -308,7 +310,9 @@ backend/reliefnet/
   parsing.py        the offline Hinglish message parser
   areas/            the places on the map: patna (real OSM roads), ganga_nagar (fictional), the OSM importer
   sim.py            flood drill and load test
-  telegram_bot.py   Telegram field bot
+  telegram_bot.py   Telegram bot: help form, field chat, assignment alerts
+  intake_flow.py    the help-form conversation, the same for every channel (no network)
+  phone.py          cleans up and masks phone numbers
   auth.py           dev sign-in and Clerk tokens; picks the org graph
   seed.py           creates the graphs, indexes and demo data
 backend/tests/      logic tests, graph tests, agent and auth tests
@@ -356,4 +360,5 @@ To look at the raw graphs, open the FalkorDB Browser at http://localhost:3000 an
 - In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. The language model resolves those close calls.
 - With the lightweight `EMBED_MODE=hash`, some true duplicates stay separate. Use the default `fastembed` mode for the demo.
 - There is no screen yet to create or edit teams. Teams come from the seed step.
-- Public Telegram messages go to the first organisation by slug unless the sender uses `/org`.
+- Public Telegram messages go to `TELEGRAM_DEFAULT_ORG` (or the first organisation by slug) unless the sender uses `/org`.
+- The bot collects the family's phone number, but Dedupe does not match on it yet.
