@@ -1,6 +1,7 @@
 """Agent 2 - Dedupe. NEW -> RESOLVED (or MERGED). Links each request to one Family."""
 from __future__ import annotations
 
+from pydantic import BaseModel
 from rapidfuzz import fuzz
 
 from .. import events, llm, memory
@@ -9,16 +10,12 @@ from ..models import Candidate, Request
 from ..region_data import haversine_m
 from .base import Agent
 
-CONFIRM_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "same_household": {"type": "boolean"},
-        "confidence": {"type": "number"},
-        "reason": {"type": "string"},
-    },
-    "required": ["same_household", "confidence", "reason"],
-    "additionalProperties": False,
-}
+class ConfirmResult(BaseModel):
+    """The model's decision on a close call between two requests."""
+
+    same_household: bool
+    confidence: float
+    reason: str
 
 CONFIRM_SYSTEM = """You are the Dedupe agent of a flood relief system. Two help requests may come from
 the same household (different callers, spellings, nicknames, or a landmark versus a ward number).
@@ -122,12 +119,11 @@ class DedupeAgent(Agent):
             f"Request B: {cand.summary} (name: {cand.name or 'unknown'}, ward {cand.ward}, "
             f"landmark {cand.landmark or 'none'})\n"
             f"Evidence: {evidence}",
-            CONFIRM_SCHEMA,
+            ConfirmResult,
             effort="medium",
-            max_tokens=3000,
         )
         if out:
-            return bool(out["same_household"]), out["reason"], "claude"
+            return out.same_household, out.reason, llm.name_of(self.s.model_smart)
         return False, "close call without model confirmation; kept separate", "rules"
 
     async def new_household(self, org: str, req: Request, reason: str) -> None:

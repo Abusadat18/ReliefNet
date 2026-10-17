@@ -66,7 +66,7 @@ async def health():
 async def config():
     return {
         "auth_mode": s.auth_mode,
-        "llm": "claude" if llm.is_live() else "rules",
+        "llm": "live" if llm.is_live() else "rules",
         "models": {"fast": s.model_fast, "smart": s.model_smart} if llm.is_live() else None,
         "embed": embed_mode(),
         "telegram_bot": s.telegram_bot_username,
@@ -247,7 +247,7 @@ async def stats(user: User = Depends(require("coordinator"))):
             "merged_pairs": pairs_same_f,
         },
         "lessons_active": lessons,
-        "llm": "claude" if llm.is_live() else "rules",
+        "llm": "live" if llm.is_live() else "rules",
     }
 
 

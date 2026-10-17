@@ -8,7 +8,9 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "falkordb>=1.0.10",
   "redis>=5.0",
-  "anthropic>=1.14",
+  "langchain>=1.4",
+  "langgraph>=1.2",
+  "langchain-anthropic>=1.7",
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
   "httpx>=0.27",
@@ -20,6 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = ["fastembed>=0.4"]
+# Other model providers. Anthropic is included by default.
+openai = ["langchain-openai>=1.7"]
+ollama = ["langchain-ollama>=1.1"]
+google = ["langchain-google-genai>=4.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [build-system]

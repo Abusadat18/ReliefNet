@@ -82,7 +82,7 @@ async def make_briefing(org: str, org_name: str, shift: str | None = None) -> di
     if llm.is_live():
         prompt = f"Org: {org_name}\nShift starting: {shift} at {_clock(now_ms())}\nData:\n{d}"
         text = await llm.text_call(get_settings().model_smart, BRIEF_SYSTEM, prompt, effort="medium")
-        how = "claude" if text else "rules"
+        how = llm.name_of(get_settings().model_smart) if text else "rules"
     text = text or render_briefing_rules(org_name, shift, d)
     bid = f"B-{await redis().incr(f'rn:seq:{org}:B')}"
     await memory.save_briefing(org, bid, shift, text, how)
@@ -203,8 +203,8 @@ async def answer_why(org: str, question: str) -> dict:
         tl = "\n".join(f"{s['time']} | {s['who']} | {s['what']}" for s in trace["timeline"])
         prompt = (f"Question: {question}\nHousehold: {fam.name or fam.id} ({fam.id}), status {fam.status}\n"
                   f"Current request: {trace.get('current') or {}}\nTimeline:\n{tl}")
-        answer = await llm.text_call(get_settings().model_smart, WHY_SYSTEM, prompt, effort="medium", max_tokens=4000)
-        how = "claude" if answer else "rules"
+        answer = await llm.text_call(get_settings().model_smart, WHY_SYSTEM, prompt, effort="medium")
+        how = llm.name_of(get_settings().model_smart) if answer else "rules"
     return {"answer": answer or render_why_rules(trace), "trace": trace, "by": how}
 
 

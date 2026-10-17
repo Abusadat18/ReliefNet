@@ -1,5 +1,4 @@
 from functools import lru_cache
-import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,11 +10,16 @@ class Settings(BaseSettings):
     falkor_port: int = 6379
     falkor_password: str | None = None
 
-    # "auto" uses Claude when credentials exist, otherwise the rule-based mock.
-    llm_mode: str = "auto"  # auto | claude | mock
+    # "auto" uses the configured models when their credentials exist, otherwise
+    # the rule-based fallback. "live" always calls the models; "mock" never does.
+    llm_mode: str = "auto"  # auto | live | mock
+    # "provider:model", any provider LangChain's init_chat_model supports.
+    model_fast: str = "anthropic:claude-haiku-5-5"
+    model_smart: str = "anthropic:claude-sonnet-5-5"
     anthropic_api_key: str | None = None
-    model_fast: str = "claude-haiku-5-5"
-    model_smart: str = "claude-sonnet-5-5"
+    openai_api_key: str | None = None
+    google_api_key: str | None = None
+    ollama_base_url: str = "http://localhost:11434"
     llm_timeout_s: float = 60.0
 
     embed_mode: str = "auto"  # auto | fastembed | hash
@@ -51,11 +55,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
-
-def anthropic_credentials_present() -> bool:
-    return bool(
-        get_settings().anthropic_api_key
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-    )

@@ -229,7 +229,7 @@ export function LessonsPanel({ lessons, onLearn }: { lessons: Lesson[]; onLearn:
             <span>{LESSON_KIND[l.kind] ?? l.kind}</span>
             <span>{l.evidence.length} pieces of evidence</span>
             <span>Used in {l.used} decisions</span>
-            {l.by === "claude" && <span>Proposed by Claude</span>}
+            {l.by && l.by !== "rules" && <span>Proposed by {l.by}</span>}
           </div>
         </div>
       ))}

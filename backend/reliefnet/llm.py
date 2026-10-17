@@ -1,161 +1,148 @@
-"""Thin wrapper over the Anthropic SDK.
+"""Model-independent access to language models, through LangChain.
+
+Models are named as "provider:model" in settings, for example
+"anthropic:claude-haiku-5-5", "openai:gpt-5-mini" or "ollama:llama3.1".
+Changing provider is a configuration change; no agent code changes.
+
+LangChain only talks to the model here. Nothing is remembered on the
+LangChain side: no checkpointer, no store. All memory is the FalkorDB graph.
 
 Every caller has a rule-based fallback, so a missing key, a rate limit or a
 refusal degrades the demo instead of stopping the pipeline."""
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import Any, Awaitable, Callable
+import os
+from functools import lru_cache
+from typing import Any, Sequence, TypeVar
 
-import anthropic
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel
 
-from .config import anthropic_credentials_present, get_settings
+from .config import get_settings
 
 log = logging.getLogger(__name__)
 
-_client: anthropic.AsyncAnthropic | None = None
 _sem = asyncio.Semaphore(8)
+T = TypeVar("T", bound=BaseModel)
 
-# Server-side refusal fallback is only offered on these models.
-_FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+# Anthropic models that offer server-side refusal fallback.
+_ANTHROPIC_FALLBACK = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1")
+
+
+def provider_of(spec: str) -> str:
+    """The provider part of a "provider:model" spec (guessed for bare names)."""
+    if ":" in spec:
+        return spec.split(":", 1)[0]
+    if spec.startswith("claude"):
+        return "anthropic"
+    if spec.startswith(("gpt", "o1", "o3", "o4")):
+        return "openai"
+    return ""
+
+
+def name_of(spec: str) -> str:
+    return spec.split(":", 1)[1] if ":" in spec else spec
+
+
+def _credentials(provider: str) -> bool:
+    s = get_settings()
+    if provider == "anthropic":
+        return bool(s.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    if provider == "openai":
+        return bool(s.openai_api_key or os.environ.get("OPENAI_API_KEY"))
+    if provider == "google_genai":
+        return bool(s.google_api_key or os.environ.get("GOOGLE_API_KEY"))
+    # Local providers such as Ollama need no key.
+    return provider in ("ollama",)
 
 
 def is_live() -> bool:
-    mode = get_settings().llm_mode
-    if mode == "mock":
+    s = get_settings()
+    if s.llm_mode == "mock":
         return False
-    if mode == "claude":
+    if s.llm_mode in ("live", "claude"):
         return True
-    return anthropic_credentials_present()
+    return all(_credentials(provider_of(m)) for m in (s.model_fast, s.model_smart))
 
 
-def client() -> anthropic.AsyncAnthropic:
-    global _client
-    if _client is None:
-        s = get_settings()
-        kwargs: dict[str, Any] = {"timeout": s.llm_timeout_s, "max_retries": 2}
+@lru_cache(maxsize=16)
+def chat_model(spec: str, effort: str | None = None) -> BaseChatModel:
+    """A LangChain chat model for `spec`, with provider-specific extras applied."""
+    s = get_settings()
+    provider, name = provider_of(spec), name_of(spec)
+    kwargs: dict[str, Any] = {"timeout": s.llm_timeout_s, "max_retries": 2}
+    if provider == "anthropic":
+        kwargs["max_tokens"] = 6000
         if s.anthropic_api_key:
             kwargs["api_key"] = s.anthropic_api_key
-        _client = anthropic.AsyncAnthropic(**kwargs)
-    return _client
+        if effort:
+            kwargs["reasoning_effort"] = effort
+        if name in _ANTHROPIC_FALLBACK:
+            # On a refusal, the API re-runs the request on a fallback model itself.
+            kwargs["betas"] = ["server-side-fallback-2026-07-01"]
+            kwargs["model_kwargs"] = {"fallbacks": "default"}
+    elif provider == "openai":
+        if s.openai_api_key:
+            kwargs["api_key"] = s.openai_api_key
+    elif provider == "google_genai":
+        if s.google_api_key:
+            kwargs["api_key"] = s.google_api_key
+    elif provider == "ollama":
+        kwargs = {"base_url": s.ollama_base_url}
+    return init_chat_model(name, model_provider=provider or None, **kwargs)
 
 
-async def _create(model: str, **kw: Any):
-    async with _sem:
-        if model in _FALLBACK_MODELS:
-            return await client().beta.messages.create(
-                model=model, betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw
-            )
-        return await client().messages.create(model=model, **kw)
+def _messages(system: str, user: str) -> list:
+    return [SystemMessage(system), HumanMessage(user)]
 
 
-def _text_of(resp) -> str:
-    return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-
-
-def _ok(resp) -> bool:
-    if resp.stop_reason == "refusal":
-        log.warning("model refused: %s", getattr(resp, "stop_details", None))
-        return False
-    return True
-
-
-async def json_call(
-    model: str,
-    system: str,
-    user: str,
-    schema: dict,
-    *,
-    effort: str = "low",
-    max_tokens: int = 4000,
-) -> dict | None:
+async def json_call(spec: str, system: str, user: str, schema: type[T], *, effort: str = "low") -> T | None:
+    """Ask for output that matches the Pydantic `schema`; None on any failure."""
     if not is_live():
         return None
     try:
-        resp = await _create(
-            model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
-        )
-        if not _ok(resp) or resp.stop_reason == "max_tokens":
-            return None
-        return json.loads(_text_of(resp))
-    except (anthropic.AnthropicError, json.JSONDecodeError, TypeError) as e:
-        log.warning("json_call failed on %s: %s", model, e)
+        # json_schema uses the provider's native structured output where it has
+        # one. That matters on Claude 5.5 models, which reject forced tool calls.
+        model = chat_model(spec, effort).with_structured_output(schema, method="json_schema")
+        async with _sem:
+            return await model.ainvoke(_messages(system, user))
+    except Exception as e:  # provider SDKs raise different error types
+        log.warning("json_call failed on %s: %s", spec, e)
         return None
 
 
-async def text_call(
-    model: str, system: str, user: str, *, effort: str = "medium", max_tokens: int = 6000
-) -> str | None:
+async def text_call(spec: str, system: str, user: str, *, effort: str = "medium") -> str | None:
     if not is_live():
         return None
     try:
-        resp = await _create(
-            model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config={"effort": effort},
-        )
-        if not _ok(resp):
-            return None
-        return _text_of(resp).strip() or None
-    except (anthropic.AnthropicError, TypeError) as e:
-        log.warning("text_call failed on %s: %s", model, e)
+        async with _sem:
+            msg = await chat_model(spec, effort).ainvoke(_messages(system, user))
+        return msg.text.strip() or None
+    except Exception as e:
+        log.warning("text_call failed on %s: %s", spec, e)
         return None
 
 
-ToolExecutor = Callable[[str, dict], Awaitable[str]]
+async def run_agent(spec: str, system: str, history: list[dict], tools: Sequence, *,
+                    effort: str = "low", max_steps: int = 12) -> str | None:
+    """Run a tool-using agent (LangChain `create_agent`, which runs on LangGraph).
 
-
-async def tool_loop(
-    model: str,
-    system: str,
-    messages: list[dict],
-    tools: list[dict],
-    execute: ToolExecutor,
-    *,
-    effort: str = "low",
-    max_rounds: int = 6,
-) -> tuple[str | None, list[dict]]:
-    """Run a manual agentic loop. Returns (final text, tool calls made)."""
+    `history` is a list of {"role": "user"|"assistant", "content": str}. The
+    agent keeps no state between calls: no checkpointer, no store."""
     if not is_live():
-        return None, []
-    calls: list[dict] = []
-    convo = list(messages)
+        return None
     try:
-        for _ in range(max_rounds):
-            resp = await _create(
-                model,
-                max_tokens=4000,
-                system=system,
-                messages=convo,
-                tools=tools,
-                output_config={"effort": effort},
-            )
-            if not _ok(resp):
-                return None, calls
-            uses = [b for b in resp.content if b.type == "tool_use"]
-            if resp.stop_reason != "tool_use" or not uses:
-                return _text_of(resp).strip(), calls
-            convo.append({"role": "assistant", "content": resp.content})
-            results = []
-            for u in uses:
-                try:
-                    out = await execute(u.name, dict(u.input))
-                    results.append({"type": "tool_result", "tool_use_id": u.id, "content": out})
-                    calls.append({"tool": u.name, "input": dict(u.input), "result": out})
-                except Exception as e:  # report tool failures back to the model
-                    results.append(
-                        {"type": "tool_result", "tool_use_id": u.id, "content": f"Error: {e}", "is_error": True}
-                    )
-            convo.append({"role": "user", "content": results})
-        return "I have recorded what I could. Please check the app for details.", calls
-    except (anthropic.AnthropicError, TypeError) as e:
-        log.warning("tool_loop failed on %s: %s", model, e)
-        return None, calls
+        agent = create_agent(chat_model(spec, effort), tools=list(tools), system_prompt=system)
+        messages = [HumanMessage(m["content"]) if m["role"] == "user" else AIMessage(m["content"]) for m in history]
+        async with _sem:
+            result = await agent.ainvoke({"messages": messages}, config={"recursion_limit": max_steps})
+        final = result["messages"][-1]
+        return final.text.strip() if isinstance(final, AIMessage) and final.text.strip() else None
+    except Exception as e:
+        log.warning("agent failed on %s: %s", spec, e)
+        return None

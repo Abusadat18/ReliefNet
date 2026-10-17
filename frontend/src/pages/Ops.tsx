@@ -250,7 +250,7 @@ export function Ops() {
               <dd className="num">{s?.lessons_active ?? 0}</dd>
             </dl>
             <p className="foot">
-              Understanding: {config?.llm === "claude" ? `Claude (${config.models?.fast}, ${config.models?.smart})` : "offline rules"}.
+              Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
               Memory: FalkorDB graph {me ? `org_${me.org}` : ""}.
             </p>
           </section>

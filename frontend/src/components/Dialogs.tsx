@@ -240,7 +240,7 @@ export function BriefingDialog({ onClose }: { onClose: () => void }) {
         <div>
           <Md text={current.text} />
           <p className="result-line">
-            {current.by === "claude" ? "Written by Claude" : "Assembled from the graph"} at {clock(current.at)}. The Shift
+            {current.by === "rules" ? "Assembled from the graph" : `Written by ${current.by}`} at {clock(current.at)}. The Shift
             Coordinator also writes one automatically at each shift change.
           </p>
         </div>

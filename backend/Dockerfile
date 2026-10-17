@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY reliefnet ./reliefnet
-RUN pip install ".[embed]"
+RUN pip install ".[embed,openai,ollama]"
 # Bake the multilingual embedding model into the image so workers start offline and fast.
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
 

@@ -9,7 +9,7 @@ Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coord
 ## Quick start (Docker)
 
 1. Install Docker Desktop.
-2. Optional: copy `.env.example` to `.env` and add your `ANTHROPIC_API_KEY`. Without a key, ReliefNet uses its offline rule-based agents.
+2. Optional: copy `.env.example` to `.env` and add a model key, for example `ANTHROPIC_API_KEY`. Without a key, ReliefNet uses its offline rule-based agents. See [Language models](#language-models) to use another provider.
 3. Start the stack:
 
    ```sh
@@ -91,13 +91,13 @@ Every request moves through five statuses. Each agent watches one status, does o
 
 | Agent | Moves | What it does | Uses |
 |---|---|---|---|
-| Intake | Message → `NEW` | Reads raw messages in any language mix. Extracts people, needs, location and urgency. Geocodes landmarks with the town's own gazetteer. | Claude Haiku with a strict JSON schema; rule-based Hinglish parser offline |
-| Dedupe | `NEW` → `RESOLVED` or `MERGED` | Finds the same household in other words. Scores meaning, distance, ward, landmark, names and household makeup. Asks Claude on close calls. | FalkorDB vector index; Claude Sonnet |
+| Intake | Message → `NEW` | Reads raw messages in any language mix. Extracts people, needs, location and urgency. Geocodes landmarks with the town's own gazetteer. | Fast model with structured output; rule-based Hinglish parser offline |
+| Dedupe | `NEW` → `RESOLVED` or `MERGED` | Finds the same household in other words. Scores meaning, distance, ward, landmark, names and household makeup. Asks the smart model on close calls. | FalkorDB vector index; smart model |
 | Triage | `RESOLVED` → `TRIAGED` | Scores priority with reasons (medical, elderly, children, water entering, waiting time). Lifts whole clusters of unserved households. | `algo.labelPropagation` community detection; area lessons |
 | Dispatch | `TRIAGED` → `ASSIGNED` | Picks a team by supplies, route time, load and team lessons. Routes around flooded roads. Hands off to the team's field agent. | `algo.SPpaths` on the shared road graph; road lessons |
-| Field | `ASSIGNED` → `DELIVERED` | Chat for volunteers on the web or Telegram. Records deliveries, road reports, new needs and observations. | Claude Haiku with seven tools; rule-based intents offline |
-| Shift Coordinator | — | Writes handover briefings. Answers "why" questions from the household's path. | Path queries; Claude Sonnet |
-| Learner | — | Turns field evidence into typed lessons, for example "NH-12 Bridge floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Claude Sonnet plus rules; procedural memory |
+| Field | `ASSIGNED` → `DELIVERED` | Chat for volunteers on the web or Telegram. Records deliveries, road reports, new needs and observations. | Fast model with seven tools (LangChain agent on LangGraph); rule-based intents offline |
+| Shift Coordinator | — | Writes handover briefings. Answers "why" questions from the household's path. | Path queries; smart model |
+| Learner | — | Turns field evidence into typed lessons, for example "NH-12 Bridge floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Smart model plus rules; procedural memory |
 
 Several copies of an agent can run at once, in one process or on many machines. An agent claims an item with a lease in one atomic query, renews the lease while it works, and writes its result only while it still holds the lease. If an agent dies, its lease expires and another copy takes the item. No request is handled twice.
 
@@ -137,6 +137,27 @@ To turn on Clerk:
 4. Put `VITE_CLERK_PUBLISHABLE_KEY` in `.env` (for Docker) and in `frontend/.env` (for `npm run dev`).
 5. Rebuild the web image.
 
+### Language models
+
+ReliefNet does not depend on one model provider. All model calls go through `backend/reliefnet/llm.py`, which uses LangChain:
+
+- Intake, Dedupe and the Learner use structured output (`with_structured_output`) with Pydantic classes.
+- Briefings and "why" answers use plain text calls.
+- The Field agent uses LangChain's `create_agent`, which runs on LangGraph. Its seven tools are plain Python functions with the `@tool` decorator.
+
+To change provider, set `MODEL_FAST` and `MODEL_SMART` and the matching key:
+
+| Provider | Example | Install |
+|---|---|---|
+| Anthropic (default) | `anthropic:claude-sonnet-5-5` | included |
+| OpenAI | `openai:gpt-5-mini` | `pip install ".[openai]"` |
+| Google | `google_genai:gemini-2.5-flash` | `pip install ".[google]"` |
+| Ollama (local, free) | `ollama:llama3.1` | `pip install ".[ollama]"` |
+
+The Docker image includes Anthropic, OpenAI and Ollama. The prompts were written for Claude, so smaller models can extract Hinglish less reliably.
+
+**FalkorDB is the only memory.** LangChain and LangGraph only talk to the model. ReliefNet uses no LangGraph checkpointer, no LangGraph store and no LangChain memory classes. Each agent run starts fresh, and every fact it learns is written to the graph through the tools.
+
 ### Telegram
 
 1. Create a bot with @BotFather.
@@ -151,9 +172,9 @@ All settings are environment variables. `.env.example` lists them with comments.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | empty | Claude key. Empty means offline rules. |
-| `LLM_MODE` | `auto` | `auto`, `claude` or `mock` |
-| `MODEL_FAST` / `MODEL_SMART` | `claude-haiku-5-5` / `claude-sonnet-5-5` | Models for high-volume and reasoning work |
+| `MODEL_FAST` / `MODEL_SMART` | `anthropic:claude-haiku-5-5` / `anthropic:claude-sonnet-5-5` | Models for high-volume and reasoning work, as `provider:model` |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` | empty | Key for the provider you use. No key means offline rules. |
+| `LLM_MODE` | `auto` | `auto`, `live` or `mock` |
 | `EMBED_MODE` | `auto` | `fastembed` (multilingual MiniLM) or `hash` |
 | `AUTH_MODE` | `dev` | `dev` or `clerk` |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
@@ -181,4 +202,4 @@ docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 
 - Ganga Nagar is a fictional town. All sample data is illustrative.
 - The drill compresses time: simulated teams arrive in seconds, not minutes.
-- In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. Claude resolves those close calls.
+- In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. The language model resolves those close calls.

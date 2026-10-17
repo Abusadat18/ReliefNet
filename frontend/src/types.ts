@@ -11,7 +11,7 @@ export interface Me {
 
 export interface AppConfig {
   auth_mode: "dev" | "clerk";
-  llm: "claude" | "rules";
+  llm: "live" | "rules";
   models: { fast: string; smart: string } | null;
   embed: string;
   telegram_bot: string | null;

@@ -1,6 +1,10 @@
 """Agent 1 - Intake. Raw message -> structured Request (status NEW)."""
 from __future__ import annotations
 
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
 from .. import embed, events, field_ops, geo, llm, memory
 from ..db import now_ms, redis
 from ..domain import NEEDS, URGENCY
@@ -8,35 +12,31 @@ from ..models import Message, Request
 from ..parsing import parse_message
 from .base import Agent
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "kind": {"type": "string", "enum": ["help_request", "road_report", "info", "volunteer_offer", "other"]},
-        "contact_name": {"type": "string", "description": "Family or contact name, empty if none"},
-        "people": {"type": "integer", "description": "Total people needing help, 0 if unknown"},
-        "elderly": {"type": "integer"},
-        "children": {"type": "integer"},
-        "pregnant_or_disabled": {"type": "integer"},
-        "medical_condition": {"type": "string", "description": "Short medical detail, empty if none"},
-        "needs": {"type": "array", "items": {"type": "string", "enum": NEEDS}},
-        "water_entering": {"type": "boolean"},
-        "trapped": {"type": "boolean"},
-        "urgency": {"type": "string", "enum": URGENCY},
-        "ward": {"type": "integer", "description": "Ward number, 0 if not stated"},
-        "landmark": {"type": "string", "description": "Canonical landmark name from the gazetteer, empty if none"},
-        "location_text": {"type": "string"},
-        "road_name": {"type": "string", "description": "For road reports: canonical road name, else empty"},
-        "road_status": {"type": "string", "enum": ["", "flooded", "open"]},
-        "summary_en": {"type": "string", "description": "One-line English summary for coordinators"},
-        "language": {"type": "string"},
-    },
-    "required": [
-        "kind", "contact_name", "people", "elderly", "children", "pregnant_or_disabled", "medical_condition",
-        "needs", "water_entering", "trapped", "urgency", "ward", "landmark", "location_text", "road_name",
-        "road_status", "summary_en", "language",
-    ],
-    "additionalProperties": False,
-}
+Need = Literal[tuple(NEEDS)]  # type: ignore[valid-type]
+Urgency = Literal[tuple(URGENCY)]  # type: ignore[valid-type]
+
+
+class IntakeResult(BaseModel):
+    """What the model extracts from one raw message."""
+
+    kind: Literal["help_request", "road_report", "info", "volunteer_offer", "other"]
+    contact_name: str = Field(description="Family or contact name, empty if none")
+    people: int = Field(description="Total people needing help, 0 if unknown")
+    elderly: int
+    children: int
+    pregnant_or_disabled: int
+    medical_condition: str = Field(description="Short medical detail, empty if none")
+    needs: list[Need]
+    water_entering: bool
+    trapped: bool
+    urgency: Urgency
+    ward: int = Field(description="Ward number, 0 if not stated")
+    landmark: str = Field(description="Canonical landmark name from the gazetteer, empty if none")
+    location_text: str
+    road_name: str = Field(description="For road reports: canonical road name, else empty")
+    road_status: Literal["", "flooded", "open"]
+    summary_en: str = Field(description="One-line English summary for coordinators")
+    language: str
 
 SYSTEM = """You are the Intake agent of ReliefNet, a flood relief coordination system in Ganga Nagar.
 You read raw help messages from WhatsApp, Telegram, phone call notes and social posts. They are often
@@ -76,9 +76,9 @@ class IntakeAgent(Agent):
             from ..routing import road_names
 
             system = SYSTEM.format(gazetteer=gaz, roads=", ".join(await road_names()))
-            out = await llm.json_call(self.s.model_fast, system, f"Message:\n<<<\n{text}\n>>>", SCHEMA)
+            out = await llm.json_call(self.s.model_fast, system, f"Message:\n<<<\n{text}\n>>>", IntakeResult)
             if out:
-                return out, "claude"
+                return out.model_dump(), llm.name_of(self.s.model_fast)
         return parse_message(text, await geo.landmark_names()), "rules"
 
     async def process(self, org: str, msg: Message) -> None:

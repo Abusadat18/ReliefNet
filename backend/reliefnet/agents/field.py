@@ -7,83 +7,15 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Literal
 
+from langchain.tools import tool
 from rapidfuzz import fuzz
 
 from .. import events, field_ops, llm, memory, routing
 from ..config import get_settings
 from ..db import now_ms, redis
 from ..domain import NEEDS
-
-TOOLS = [
-    {
-        "name": "my_assignments",
-        "description": "List the open assignments for the volunteer's team, highest priority first.",
-        "input_schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
-    },
-    {
-        "name": "mark_delivered",
-        "description": "Record that help was delivered for one assignment. Use the request id (R-...).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "request_id": {"type": "string"},
-                "items": {"type": "array", "items": {"type": "string"}, "description": "What was given"},
-                "notes": {"type": "string", "description": "Condition of the household, follow-up needed"},
-            },
-            "required": ["request_id", "items", "notes"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "report_road",
-        "description": "Report that a road or bridge is flooded, or open again. This changes routes for everyone.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "road": {"type": "string", "description": "Road or bridge name"},
-                "status": {"type": "string", "enum": ["flooded", "open"]},
-            },
-            "required": ["road", "status"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "report_new_need",
-        "description": "Log a new household that needs help, seen in the field. Include people, needs and location.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"description": {"type": "string"}},
-            "required": ["description"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "report_observation",
-        "description": "Save a useful field observation (water levels, crowding, hazards) for coordinators and the Learner.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "nearest_shelters",
-        "description": "Find open shelters near one of the team's assignments or near a request id.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"request_id": {"type": "string"}},
-            "required": ["request_id"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "road_status",
-        "description": "List roads and bridges that are currently flooded or reported.",
-        "input_schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
-    },
-]
 
 SYSTEM = """You are the Field agent of ReliefNet, talking to a flood relief volunteer on a phone.
 Volunteer: {name}, {team}. Organisation: {org}.
@@ -158,6 +90,60 @@ class FieldSession:
         self.actions.append({"tool": name, "input": args, "result": out})
         return json.dumps(out, default=str)
 
+    def tools(self) -> list:
+        """The only actions the model may take. Each one runs `execute`, the same
+        code the offline rules use, so there is one implementation per action."""
+        run = self.execute
+
+        @tool
+        async def my_assignments() -> str:
+            """List the open assignments for the volunteer's team, highest priority first."""
+            return await run("my_assignments", {})
+
+        @tool(parse_docstring=True)
+        async def mark_delivered(request_id: str, items: list[str], notes: str) -> str:
+            """Record that help was delivered for one assignment.
+
+            Args:
+                request_id: The request id, for example R-123.
+                items: What was given.
+                notes: Condition of the household and any follow-up needed.
+            """
+            return await run("mark_delivered", {"request_id": request_id, "items": items, "notes": notes})
+
+        @tool(parse_docstring=True)
+        async def report_road(road: str, status: Literal["flooded", "open"]) -> str:
+            """Report that a road or bridge is flooded, or open again. This changes routes for everyone.
+
+            Args:
+                road: Road or bridge name.
+                status: "flooded" or "open".
+            """
+            return await run("report_road", {"road": road, "status": status})
+
+        @tool
+        async def report_new_need(description: str) -> str:
+            """Log a new household that needs help, seen in the field. Include people, needs and location."""
+            return await run("report_new_need", {"description": description})
+
+        @tool
+        async def report_observation(text: str) -> str:
+            """Save a useful field observation (water levels, crowding, hazards) for coordinators and the Learner."""
+            return await run("report_observation", {"text": text})
+
+        @tool
+        async def nearest_shelters(request_id: str) -> str:
+            """Find open shelters near one of the team's assignments, given its request id."""
+            return await run("nearest_shelters", {"request_id": request_id})
+
+        @tool
+        async def road_status() -> str:
+            """List roads and bridges that are currently flooded or reported."""
+            return await run("road_status", {})
+
+        return [my_assignments, mark_delivered, report_road, report_new_need, report_observation,
+                nearest_shelters, road_status]
+
     async def reply(self, text: str) -> dict:
         await field_ops.add_observation(self.org, text, by=self.v["id"], channel=self.channel)
         await _remember(self.org, self.v["id"], "user", text)
@@ -165,7 +151,7 @@ class FieldSession:
         if llm.is_live():
             hist = await history(self.org, self.v["id"], limit=12)
             msgs = [{"role": "user" if h["role"] == "user" else "assistant", "content": h["text"]} for h in hist[:-1]]
-            # The API needs alternating roles starting with a user turn.
+            # Most model APIs need alternating roles starting with a user turn.
             while msgs and msgs[0]["role"] != "user":
                 msgs.pop(0)
             merged: list[dict] = []
@@ -179,7 +165,7 @@ class FieldSession:
             else:
                 merged.append({"role": "user", "content": text})
             system = SYSTEM.format(name=self.v.get("name"), team=self.v.get("team") or "no team", org=self.org)
-            answer, _ = await llm.tool_loop(get_settings().model_fast, system, merged, TOOLS, self.execute)
+            answer = await llm.run_agent(get_settings().model_fast, system, merged, self.tools())
         if not answer:
             answer = await self.rules_reply(text)
         await _remember(self.org, self.v["id"], "agent", answer, {"actions": self.actions})

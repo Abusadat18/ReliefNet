@@ -113,7 +113,7 @@ export function FamilyDrawer({ trace, answer, loading, onClose, onShowRoute }: P
               <div className="answer">
                 {answer.text}
                 <span className="by">
-                  {answer.by === "claude" ? "Written by Claude from the graph timeline" : "Read directly from the graph timeline"}
+                  {answer.by === "rules" ? "Read directly from the graph timeline" : `Written by ${answer.by} from the graph timeline`}
                 </span>
               </div>
             </section>

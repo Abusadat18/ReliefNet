@@ -11,6 +11,9 @@ from __future__ import annotations
 import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from .. import embed, events, llm, memory
 from ..db import now_ms
@@ -23,30 +26,23 @@ WINDOW_MS = 24 * 3600 * 1000
 DECAY = 0.97
 SPECIALIST_NEEDS = {"medicine", "evacuation", "rescue", "baby_food", "first_aid"}
 
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "lessons": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": LESSON_KINDS},
-                    "target": {"type": "string", "description": "Road name, team name, or 'ward N'"},
-                    "need": {"type": "string", "description": "For team_skill: the need, else empty"},
-                    "after_hour": {"type": "integer", "description": "For road_risk: local hour 0-23, or -1"},
-                    "text": {"type": "string", "description": "One short sentence a coordinator can act on"},
-                    "evidence_ids": {"type": "array", "items": {"type": "string"}},
-                    "confidence": {"type": "number"},
-                },
-                "required": ["kind", "target", "need", "after_hour", "text", "evidence_ids", "confidence"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["lessons"],
-    "additionalProperties": False,
-}
+LessonKind = Literal[tuple(LESSON_KINDS)]  # type: ignore[valid-type]
+
+
+class ProposedLesson(BaseModel):
+    kind: LessonKind
+    target: str = Field(description="Road name, team name, or 'ward N'")
+    need: str = Field(description="For team_skill: the need, else empty")
+    after_hour: int = Field(description="For road_risk: local hour 0-23, or -1")
+    text: str = Field(description="One short sentence a coordinator can act on")
+    evidence_ids: list[str]
+    confidence: float
+
+
+class LessonProposals(BaseModel):
+    """Lessons the model proposes from the evidence."""
+
+    lessons: list[ProposedLesson]
 
 SYSTEM = """You are the Learner agent of ReliefNet, a flood relief system. You read evidence from the
 field (road reports, delivery times, unserved areas, volunteer observations) and write short lessons
@@ -126,8 +122,8 @@ class LearnerAgent(PeriodicAgent):
             lines.append(f"[ward-{w['ward']}] ward {w['ward']}: {w['unserved']} households unserved")
         for o in ev["observations"]:
             lines.append(f"[{o['id']}] volunteer observation at {_hour(o['at'], tz)}:00: <<{o['text']}>>")
-        out = await llm.json_call(self.s.model_smart, SYSTEM, "\n".join(lines), SCHEMA, effort="medium", max_tokens=6000)
-        return (out or {}).get("lessons", [])
+        out = await llm.json_call(self.s.model_smart, SYSTEM, "\n".join(lines), LessonProposals, effort="medium")
+        return [p.model_dump() for p in out.lessons] if out else []
 
     async def tick(self, org: str) -> None:
         ev = await self.evidence(org)
@@ -135,7 +131,7 @@ class LearnerAgent(PeriodicAgent):
         rule_keys = {(p["kind"], p["target"], p["need"]) for p in proposals}
         for p in await self.llm_lessons(org, ev):
             if (p["kind"], p["target"], p.get("need") or "") not in rule_keys:
-                proposals.append({**p, "by": "claude"})
+                proposals.append({**p, "by": llm.name_of(self.s.model_smart)})
 
         touched = []
         for p in proposals:
