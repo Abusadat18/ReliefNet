@@ -145,7 +145,7 @@ class FieldSession:
                 nearest_shelters, road_status]
 
     async def reply(self, text: str) -> dict:
-        await field_ops.add_observation(self.org, text, by=self.v["id"], channel=self.channel)
+        oid = await field_ops.add_observation(self.org, text, by=self.v["id"], channel=self.channel)
         await _remember(self.org, self.v["id"], "user", text)
         answer = None
         if llm.is_live():
@@ -170,8 +170,9 @@ class FieldSession:
             answer = await self.rules_reply(text)
         await _remember(self.org, self.v["id"], "agent", answer, {"actions": self.actions})
         await events.publish(
-            self.org, "field_chat", f"{self.v.get('name')} ({self.v.get('team')}): {text[:120]}",
-            volunteer=self.v["id"], team=self.v.get("team"), actions=[a["tool"] for a in self.actions],
+            self.org, "field_chat", f"{oid}: {self.v.get('name')} ({self.v.get('team')}): {text[:120]}",
+            observation=oid, volunteer=self.v["id"], team=self.v.get("team"),
+            actions=[a["tool"] for a in self.actions],
         )
         return {"reply": answer, "actions": self.actions}
 

@@ -33,7 +33,7 @@ async def ingest_message(
          "at": received_at or now_ms(), "sim": sim_household},
     )
     await events.incr(org, "messages_in")
-    await events.publish(org, "message", text[:160], id=mid, channel=channel)
+    await events.publish(org, "message", f"{mid} ({channel}): {text[:160]}", id=mid, channel=channel)
     return mid
 
 
@@ -106,13 +106,15 @@ async def report_road(
         for o in await orgs.all_orgs():
             slug = o["slug"]
             await events.publish(
-                slug, "road", f"{road} is now {new_status.upper()} (reported by {reporter if slug == org else 'another org'})",
-                road=road, status=new_status, previous=before,
+                slug, "road",
+                f"{rid}: {road} is now {new_status.upper()} (reported by {reporter if slug == org else 'another org'})",
+                road=road, status=new_status, previous=before, report=rid,
             )
             if new_status == "flooded":
                 rerouted[slug] = await reroute_affected(slug, road)
     else:
-        await events.publish(org, "road_report", f"Report on {road}: {status} (still {before})", road=road, status=before)
+        await events.publish(org, "road_report", f"{rid}: report on {road}: {status} (still {before})", road=road,
+                             status=before, report=rid)
     return {"ok": True, "road": road, "status": new_status, "previous": before, "report": rid,
             "rerouted": rerouted.get(org, [])}
 
@@ -146,8 +148,9 @@ async def mark_delivered(
     await events.incr(org, "delivered")
     await events.publish(
         org, "delivered",
-        f"{row['team']} delivered to {row['name'] or row['family']} ({request_id}): {', '.join(items) or 'help given'}",
-        id=request_id, family=row["family"], team=row["team"],
+        f"{did}: {row['team']} delivered to {row['name'] or row['family']} ({request_id}): "
+        f"{', '.join(items) or 'help given'}",
+        id=request_id, delivery=did, family=row["family"], team=row["team"],
     )
     return {"ok": True, "delivery": did, **row}
 

@@ -518,7 +518,8 @@ async def field_photo(file: UploadFile = File(...), note: str = "", user: User =
     (Path(s.uploads_dir) / name).write_bytes(data)
     oid = await field_ops.add_observation(user.org, note or "photo from the field", by=user.id, channel="web",
                                           photo=f"/uploads/{name}")
-    await events.publish(user.org, "photo", f"{user.name} sent a photo: {note or ''}".strip(), photo=f"/uploads/{name}")
+    await events.publish(user.org, "photo", f"{oid}: {user.name} sent a photo. {note}".strip(), observation=oid,
+                         photo=f"/uploads/{name}")
     return {"observation": oid, "url": f"/uploads/{name}"}
 
 

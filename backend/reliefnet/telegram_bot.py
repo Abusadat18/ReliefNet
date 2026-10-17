@@ -132,9 +132,10 @@ class Bot:
                 await self.send(chat_id, "Location saved for the coordinators.")
                 return
             if photo_url:
-                await field_ops.add_observation(org, text or "photo from the field", by=vol["id"],
-                                                channel="telegram", photo=photo_url)
-                await events.publish(org, "photo", f"{vol['name']} sent a photo via Telegram", photo=photo_url)
+                oid = await field_ops.add_observation(org, text or "photo from the field", by=vol["id"],
+                                                      channel="telegram", photo=photo_url)
+                await events.publish(org, "photo", f"{oid}: {vol['name']} sent a photo via Telegram",
+                                     observation=oid, photo=photo_url)
                 if not text:
                     await self.send(chat_id, "Photo saved for the coordinators.")
                     return
