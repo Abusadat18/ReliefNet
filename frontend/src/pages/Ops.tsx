@@ -1,3 +1,4 @@
+import { OrganizationSwitcher } from "@clerk/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
@@ -20,7 +21,7 @@ const PIPELINE: { key: string; name: string }[] = [
 ];
 
 export function Ops() {
-  const { me, config, signOut } = useSession();
+  const { me, config, signOut, mode } = useSession();
   const now = useNow(15000);
   const [tab, setTab] = useState<Tab>("queue");
   const region = useResource<Region>("/api/ops/region");
@@ -159,6 +160,16 @@ export function Ops() {
         </nav>
         <div className="head-tools">
           <span className={`live-dot${connected ? " on" : ""}`}>{connected ? "Live" : "Reconnecting"}</span>
+          {mode === "clerk" && (
+            // Admins invite and manage members from here (Manage organization > Members).
+            // A full page load after switching makes every panel reload for the new org.
+            <OrganizationSwitcher
+              hidePersonal
+              afterSelectOrganizationUrl="/"
+              afterLeaveOrganizationUrl="/"
+              afterCreateOrganizationUrl="/"
+            />
+          )}
           <ThemeToggle />
           <button type="button" className="btn quiet small" onClick={signOut} title={`Signed in as ${me?.name}`}>
             Sign out

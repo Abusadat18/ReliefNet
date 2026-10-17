@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 import jwt
 from fastapi import Depends, HTTPException, Request
@@ -130,16 +131,19 @@ async def current_user(request: Request) -> User:
             raise HTTPException(401, "sign in required")
         claims = await _verify_clerk(token)
         o = claims.get("o") or {}
-        slug = o.get("slg") or claims.get("org_slug")
+        # Organisation slugs are optional in Clerk; the org id always exists.
+        slug = o.get("slg") or claims.get("org_slug") or o.get("id") or claims.get("org_id")
         if not slug:
             raise HTTPException(403, "select an organisation first")
         slug = orgs.normalize_slug(slug)
         user = User(
             id=claims["sub"],
-            name=request.headers.get("x-user-name") or claims.get("name") or claims["sub"],
+            name=unquote(request.headers.get("x-user-name", "")) or claims.get("name") or claims["sub"],
             org=slug,
             role=_map_role(o.get("rol") or claims.get("org_role")),
         )
+        # The token carries no org name; the app sends it so a new org's graph gets a readable name.
+        return await ensure_member(user, unquote(request.headers.get("x-org-name", "")) or None)
     return await ensure_member(user)
 
 

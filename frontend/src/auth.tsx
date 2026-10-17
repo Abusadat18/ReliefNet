@@ -1,4 +1,4 @@
-import { ClerkProvider, useAuth, useUser } from "@clerk/react";
+import { ClerkProvider, useAuth, useOrganization, useUser } from "@clerk/react";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, setCredentialSource, type Credentials } from "./api";
 import type { AppConfig, Me } from "./types";
@@ -107,6 +107,7 @@ function DevAuth({ config, children }: { config: AppConfig; children: ReactNode 
 function ClerkBridge({ config, children }: { config: AppConfig; children: ReactNode }) {
   const { isLoaded, isSignedIn, getToken, orgSlug, signOut } = useAuth();
   const { user } = useUser();
+  const { organization } = useOrganization();
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -115,7 +116,9 @@ function ClerkBridge({ config, children }: { config: AppConfig; children: ReactN
   setCredentialSource(async (): Promise<Credentials> => {
     const token = await getToken();
     return {
-      headers: token ? { authorization: `Bearer ${token}`, "x-user-name": displayName } : ({} as Record<string, string>),
+      headers: token
+        ? { authorization: `Bearer ${token}`, "x-user-name": encodeURIComponent(displayName),"x-org-name": encodeURIComponent(organization?.name ?? "") }
+        : ({} as Record<string, string>),
       query: token ? { token } : ({} as Record<string, string>),
     };
   });

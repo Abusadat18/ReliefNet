@@ -75,11 +75,19 @@ export function Login() {
           <>
             <Show when="signed-out">
               <h2>Sign in to your relief organisation</h2>
+              <p className="login-foot">
+                New here? Ask your organisation's admin to invite your email address. Then sign in with that address
+                and accept the invitation to join their team.
+              </p>
               <SignIn routing="hash" />
             </Show>
             <Show when="signed-in">
               <h2>Choose your organisation</h2>
               <p>Each organisation has its own private memory. Pick the one you are working for today.</p>
+              <p className="login-foot">
+                Not in the list? Your organisation's admin must invite your email address first. Invitations appear here
+                after you accept them from the email.
+              </p>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                 <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl="/" afterCreateOrganizationUrl="/" />
                 <UserButton />
