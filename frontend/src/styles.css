@@ -444,6 +444,10 @@ select.input {
   stroke: var(--hazard);
   stroke-width: 5;
 }
+.chart .road.low:not(.bridge):not(.reported):not(.flooded) {
+  stroke: var(--water-ink);
+  stroke-dasharray: 2 4;
+}
 .chart .road-hit {
   stroke: transparent;
   stroke-width: 14;
@@ -543,6 +547,137 @@ select.input {
     opacity: 0;
     r: 40;
   }
+}
+
+.chart .land-outside {
+  fill: color-mix(in srgb, var(--land) 50%, var(--paper));
+}
+.chart .water-line {
+  fill: none;
+  stroke: var(--water-deep);
+  stroke-width: 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart .water-line.river,
+.chart .water-line.canal {
+  stroke-width: 7;
+}
+.chart .rail {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+/* Railway ties: the dashed inner line of the classic railway symbol. */
+.chart .rail-ties {
+  fill: none;
+  stroke: var(--paper);
+  stroke-width: 1.4;
+  stroke-dasharray: 6 6;
+  vector-effect: non-scaling-stroke;
+}
+.chart .road-label {
+  font-weight: 700;
+  font-variation-settings: "wdth" 85;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-linejoin: round;
+}
+
+/* Google map: the basemap draws the streets; our SVG adds the operation on top. */
+.gmap {
+  position: absolute;
+  inset: 0;
+  background: var(--land);
+}
+.maptype {
+  position: absolute;
+  right: 22px;
+  bottom: 206px;
+  display: grid;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.maptype button {
+  border: 0;
+  background: var(--paper);
+  color: var(--ink-2);
+  padding: 6px 9px;
+  font: inherit;
+  font-size: var(--step--1);
+  font-variation-settings: "wdth" 85;
+  cursor: pointer;
+}
+.maptype button + button {
+  border-top: 1px solid var(--rule);
+}
+.maptype.detail {
+  bottom: 276px;
+}
+.layers-menu {
+  position: absolute;
+  top: 70px;
+  right: 22px;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.layers-toggle {
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 700;
+  cursor: pointer;
+}
+.layers-toggle[aria-expanded="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.layers-list {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 6px;
+  font-size: var(--step--1);
+}
+.layers-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.layers-list input {
+  accent-color: var(--ink);
+}
+.maptype button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+.map-note {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 32px));
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--waiting-soft);
+  border: 1px solid var(--waiting);
+  border-radius: 4px;
+  font-size: var(--step--1);
 }
 
 /* Chart neatline with a graduated border, as on a printed chart. */

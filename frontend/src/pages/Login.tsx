@@ -10,7 +10,7 @@ interface DevUser extends DevIdentity {
 }
 
 /** A fragment of chart: soundings and contour lines around a river bend. */
-function ChartArt() {
+function ChartArt({ road }: { road: string }) {
   const soundings = [
     [120, 180, "3"], [260, 140, "4"], [410, 210, "6"], [560, 170, "7"], [700, 230, "5"],
     [180, 300, "2"], [340, 330, "5"], [500, 300, "8"], [650, 340, "6"], [820, 290, "4"],
@@ -38,7 +38,7 @@ function ChartArt() {
         <path d="M418 258l24 24M442 258l-24 24" />
       </g>
       <text x="452" y="276" fill="var(--hazard)" fontSize="17" fontWeight="700">
-        NH-12 Bridge
+        {road}
       </text>
       <path d="M150 60L250 80L330 62L430 116" fill="none" stroke="var(--route)" strokeWidth="3" strokeDasharray="2 7" strokeLinecap="round" />
       <circle cx="150" cy="60" r="9" fill="var(--route)" />
@@ -48,7 +48,7 @@ function ChartArt() {
 }
 
 export function Login() {
-  const { mode, signInDev, error } = useSession();
+  const { mode, signInDev, error, config } = useSession();
   const [users, setUsers] = useState<DevUser[] | null>(null);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export function Login() {
   return (
     <div className="login">
       <div className="login-art">
-        <ChartArt />
+        <ChartArt road={config?.area.flood_road ?? ""} />
         <div className="title">
           <h1>ReliefNet</h1>
           <p>

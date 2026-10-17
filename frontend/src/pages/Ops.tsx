@@ -1,14 +1,18 @@
 import { OrganizationSwitcher } from "@clerk/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
 import { ChartMap, type Flash } from "../components/ChartMap";
 import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialogs";
 import { FamilyDrawer } from "../components/FamilyDrawer";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
+import { LayersMenu, useMapLayers } from "../components/LayersMenu";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { clock, useLiveEvents, useNow, useResource, useThrottled } from "../hooks";
 import type { AgentInfo, Lesson, LiveEvent, QueueItem, Region, Road, Snapshot, Stats, Trace } from "../types";
+
+// deck.gl and the map code load only when the server has a Google Maps key.
+const GoogleMap = lazy(() => import("../components/GoogleMap").then((m) => ({ default: m.GoogleMap })));
 
 type Tab = "queue" | "feed" | "agents" | "lessons";
 
@@ -42,6 +46,8 @@ export function Ops() {
   const [roadPop, setRoadPop] = useState<{ road: Road; x: number; y: number } | null>(null);
   const [roadMsg, setRoadMsg] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [mapFailed, setMapFailed] = useState<string | null>(null);
+  const [layers, setLayer] = useMapLayers();
 
   useEffect(() => {
     api.get<LiveEvent[]>("/api/ops/events?count=200").then(setEvents).catch(() => undefined);
@@ -71,9 +77,9 @@ export function Ops() {
         const name = e.data.road as string;
         const seg = roads.data?.find((r) => r.name === name) ?? region.data?.roads.find((r) => r.name === name);
         if (seg && e.data.status === "flooded") {
-          const [a, b] = seg.coords;
+          const [lat, lon] = seg.coords[Math.floor((seg.coords.length - 1) / 2)];
           const id = `${name}-${e.at}`;
-          setFlashes((f) => [...f, { id, lat: (a[0] + b[0]) / 2, lon: (a[1] + b[1]) / 2 }]);
+          setFlashes((f) => [...f, { id, lat, lon }]);
           window.setTimeout(() => setFlashes((f) => f.filter((x) => x.id !== id)), 3500);
         }
       }
@@ -128,6 +134,26 @@ export function Ops() {
     }
   };
 
+  const mapProps = (r: Region) => ({
+    region: r,
+    snapshot: snapshot.data,
+    selected,
+    focusRequest,
+    flashes,
+    show: layers,
+    onSelectFamily: openFamily,
+    onRoadClick: (road: Road, at: { x: number; y: number }) => {
+      const box = wrapRef.current!.getBoundingClientRect();
+      setRoadMsg(null);
+      // Keep the whole card (about 260 px tall) above the question bar.
+      setRoadPop({
+        road,
+        x: Math.max(8, Math.min(at.x - box.left + 12, box.width - 256)),
+        y: Math.max(8, Math.min(at.y - box.top + 12, box.height - 340)),
+      });
+    },
+  });
+
   const s = stats.data;
   const fam = s?.families ?? {};
   const totalFam = (fam.SERVED ?? 0) + (fam.ASSIGNED ?? 0) + (fam.UNSERVED ?? 0);
@@ -180,25 +206,26 @@ export function Ops() {
       <div className="ops-body">
         <div className="chart-wrap" ref={wrapRef}>
           {mergedRegion ? (
-            <ChartMap
-              region={mergedRegion}
-              snapshot={snapshot.data}
-              selected={selected}
-              focusRequest={focusRequest}
-              flashes={flashes}
-              onSelectFamily={openFamily}
-              onRoadClick={(road, at) => {
-                const box = wrapRef.current!.getBoundingClientRect();
-                setRoadMsg(null);
-                setRoadPop({
-                  road,
-                  x: Math.min(at.x - box.left + 12, box.width - 256),
-                  y: Math.min(at.y - box.top + 12, box.height - 200),
-                });
-              }}
-            />
+            config?.google_maps && !mapFailed ? (
+              <Suspense fallback={<p className="empty">Loading the map…</p>}>
+                <GoogleMap
+                  apiKey={config.google_maps.api_key}
+                  mapId={config.google_maps.map_id}
+                  mapIdDetailed={config.google_maps.map_id_detailed ?? null}
+                  onFail={setMapFailed}
+                  {...mapProps(mergedRegion)}
+                />
+              </Suspense>
+            ) : (
+              <ChartMap {...mapProps(mergedRegion)} />
+            )
           ) : (
             <p className="empty">{region.error ?? "Loading the chart…"}</p>
+          )}
+          {mapFailed && (
+            <p className="map-note" role="status">
+              {mapFailed}
+            </p>
           )}
 
           <div className="legend" aria-label="Legend">
@@ -220,7 +247,12 @@ export function Ops() {
             <span>
               <i className="line" style={{ borderColor: "var(--waiting)", borderTopStyle: "dashed" }} /> Reported, not confirmed
             </span>
+            <span>
+              <i className="line" style={{ borderColor: "var(--water-ink)", borderTopStyle: "dotted" }} /> Low road near a drain
+            </span>
           </div>
+
+          {mergedRegion && <LayersMenu visible={layers} onChange={setLayer} />}
 
           <div className="chart-tools">
             <button type="button" className="btn" onClick={() => setDialog("message")}>
@@ -235,7 +267,7 @@ export function Ops() {
           </div>
 
           <section className="cartouche" aria-label="Operation figures">
-            <h2>Ganga Nagar flood operation</h2>
+            <h2>{config?.area.title ?? region.data?.area?.title} flood operation</h2>
             <dl>
               <dt>Households reached</dt>
               <dd className="num">
@@ -263,6 +295,7 @@ export function Ops() {
             <p className="foot">
               Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
               Memory: FalkorDB graph {me ? `org_${me.org}` : ""}.
+              {region.data?.area?.attribution && <> {region.data.area.attribution}.</>}
             </p>
           </section>
 

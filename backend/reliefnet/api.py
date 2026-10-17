@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, db, events, field_ops, geo, llm, orgs, routing, sim
+from . import areas, auth, db, events, field_ops, geo, llm, orgs, routing, sim
 from .agents.base import AGENTS_KEY, cmd_key
 from .agents.coordinator import answer_why, family_trace, make_briefing
 from .agents.field import FieldSession, history
@@ -64,6 +64,7 @@ async def health():
 
 @app.get("/api/config")
 async def config():
+    reg, drill = areas.region(), areas.drill()
     return {
         "auth_mode": s.auth_mode,
         "llm": "live" if llm.is_live() else "rules",
@@ -71,6 +72,14 @@ async def config():
         "embed": embed_mode(),
         "telegram_bot": s.telegram_bot_username,
         "orgs": [{"slug": o["slug"], "name": o["name"]} for o in await orgs.all_orgs()],
+        "area": {"name": reg.name, "title": reg.title, "flood_road": drill.flood_road,
+                 "example_road_report": drill.example_road_report,
+                 "example_help": drill.example_help},
+        # The browser always receives a Maps JavaScript key; restrict it to your sites in Google Cloud.
+        "google_maps": {"api_key": s.google_maps_api_key,
+                        "map_id": s.google_maps_map_id or "DEMO_MAP_ID",
+                        "map_id_detailed": s.google_maps_map_id_detailed or None}
+                       if s.google_maps_api_key else None,
     }
 
 
@@ -122,7 +131,8 @@ async def public_help(org: str, body: HelpIn, request: Request):
 # ---------------------------------------------------------------- ops dashboard
 @app.get("/api/ops/region")
 async def region(user: User = Depends(current_user)):
-    river = await query(REGION_GRAPH, "MATCH (m:Meta {key:'river'}) RETURN m.polygon AS p", readonly=True)
+    meta = {r["k"]: r["v"] for r in await query(
+        REGION_GRAPH, "MATCH (m:Meta) RETURN m.key AS k, m.value AS v", readonly=True)}
     shelters = await query(
         REGION_GRAPH,
         "MATCH (s:Shelter) RETURN s.id AS id, s.name AS name, s.ward AS ward, s.capacity AS capacity,"
@@ -130,11 +140,15 @@ async def region(user: User = Depends(current_user)):
         readonly=True,
     )
     return {
+        "area": {"name": meta.get("area", ""), "title": meta.get("title", ""),
+                 "attribution": meta.get("attribution", "")},
         "roads": await routing.snapshot(),
         "wards": await geo.wards(),
         "landmarks": await geo.landmarks(),
         "shelters": shelters,
-        "river": json.loads(river[0]["p"]) if river else [],
+        "water_areas": json.loads(meta.get("water_areas") or "[]"),
+        "water_lines": json.loads(meta.get("water_lines") or "[]"),
+        "rail": json.loads(meta.get("rail") or "[]"),
     }
 
 

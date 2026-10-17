@@ -178,8 +178,8 @@ export function Field() {
       <div className="thread" ref={threadRef} aria-live="polite">
         {turns.length === 0 && (
           <div className="bubble agent">
-            Tell me what is happening. For example: "done {next?.id ?? "R-123"}, gave water and tablets", "NH-12 bridge
-            flooded", or "7 people on a roof near the school, ward 10".
+            Tell me what is happening. For example: "done {next?.id ?? "R-123"}, gave water and tablets", "{config?.area.example_road_report}",
+            or "7 people on a roof near the school, ward 10".
           </div>
         )}
         {turns.map((t, i) => (
@@ -207,7 +207,7 @@ export function Field() {
               Delivered to {next.name || next.family}
             </button>
           )}
-          <button type="button" className="hz" onClick={() => setText("NH-12 Bridge is flooded")}>
+          <button type="button" className="hz" onClick={() => setText(config?.area.example_road_report ?? "")}>
             Road flooded
           </button>
           <button type="button" onClick={() => void send("What are my tasks?")}>

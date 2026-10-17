@@ -12,7 +12,7 @@ from typing import Literal
 from langchain.tools import tool
 from rapidfuzz import fuzz
 
-from .. import events, field_ops, llm, memory, routing
+from .. import areas, events, field_ops, llm, memory, routing
 from ..config import get_settings
 from ..db import now_ms, redis
 from ..domain import NEEDS
@@ -190,7 +190,7 @@ class FieldSession:
                 out = json.loads(await self.execute("report_road", {"road": road, "status": status}))
                 extra = f" {len(out.get('rerouted') or [])} route(s) changed." if out.get("rerouted") else ""
                 return f"Recorded: {out['road']} is {out['status'].upper()}.{extra} Thank you, this updates every team."
-            return "Which road or bridge? Please send its name (for example NH-12 Bridge)."
+            return f"Which road or bridge? Please send its name (for example {areas.drill().flood_road})."
 
         if re.search(r"\b(done|delivered|diya|de diya|gave|given|pahuncha|served|complete)", t):
             target = None
@@ -241,4 +241,5 @@ class FieldSession:
             mid = await field_ops.ingest_message(self.org, text, f"field:{self.channel}", sender=self.v["id"])
             return f"Logged as a new request ({mid}). Intake and Triage will pick it up in a few seconds."
 
-        return "Noted and saved for the coordinators. You can say 'done R-123', 'NH-12 bridge flooded' or 'next task'."
+        return ("Noted and saved for the coordinators. You can say 'done R-123',"
+                f" '{areas.drill().flood_road} flooded' or 'next task'.")

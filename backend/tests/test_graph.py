@@ -5,12 +5,17 @@ import asyncio
 
 import pytest
 
-from reliefnet import db, field_ops, memory, routing
+from reliefnet import areas, db, field_ops, memory, routing
 from reliefnet.agents.base import Agent
 from reliefnet.db import org_graph_name, query
 from reliefnet.seed import seed_org, seed_region
 
 ORG = "pytest_org"
+
+# Road names and junctions come from the active area (AREA), so the tests run on any map.
+FLOOD = areas.drill().flood_road
+OTHER = sorted(r.name for r in areas.region().roads if r.kind == "bridge" and r.name != FLOOD)[0]
+SRC, DST = areas.module().route_check()
 
 
 @pytest.fixture
@@ -61,16 +66,16 @@ async def test_flooded_road_is_avoided():
     except Exception:
         pytest.skip("FalkorDB not reachable")
     await seed_region()
-    before = await routing.road_state("NH-12 Bridge")
+    before = await routing.road_state(FLOOD)
     try:
-        await routing.set_road_status("NH-12 Bridge", "flooded")
-        r = await routing.route("J25", "J55")
-        assert r is not None and "NH-12 Bridge" not in r["roads"]
-        await routing.set_road_status("NH-12 Bridge", "open")
-        r2 = await routing.route("J25", "J55")
-        assert "NH-12 Bridge" in r2["roads"]
+        await routing.set_road_status(FLOOD, "flooded")
+        r = await routing.route(SRC, DST)
+        assert r is not None and FLOOD not in r["roads"]
+        await routing.set_road_status(FLOOD, "open")
+        r2 = await routing.route(SRC, DST)
+        assert FLOOD in r2["roads"]
     finally:
-        await routing.set_road_status("NH-12 Bridge", before or "open")
+        await routing.set_road_status(FLOOD, before or "open")
         await db.close()
 
 
@@ -80,24 +85,24 @@ async def test_lesson_penalty_steers_route():
     except Exception:
         pytest.skip("FalkorDB not reachable")
     await seed_region()
-    before = await routing.road_state("NH-12 Bridge")
+    before = await routing.road_state(FLOOD)
     try:
-        await routing.set_road_status("NH-12 Bridge", "open")
-        plain = await routing.route("J25", "J55")
-        steered = await routing.route("J25", "J55", {"NH-12 Bridge": 3500.0})
-        assert "NH-12 Bridge" in plain["roads"] and "NH-12 Bridge" not in steered["roads"]
+        await routing.set_road_status(FLOOD, "open")
+        plain = await routing.route(SRC, DST)
+        steered = await routing.route(SRC, DST, {FLOOD: 3500.0})
+        assert FLOOD in plain["roads"] and FLOOD not in steered["roads"]
     finally:
-        await routing.set_road_status("NH-12 Bridge", before or "open")
+        await routing.set_road_status(FLOOD, before or "open")
         await db.close()
 
 
 async def test_one_team_report_is_not_enough_to_close_a_road(graph):
-    before = await routing.road_state("Old Iron Bridge")
+    before = await routing.road_state(OTHER)
     try:
-        r1 = await field_ops.report_road(ORG, "old iron bridge", "flooded", reporter="v1", team="Team 1")
+        r1 = await field_ops.report_road(ORG, OTHER.lower(), "flooded", reporter="v1", team="Team 1")
         assert r1["status"] == "reported"
-        r2 = await field_ops.report_road(ORG, "Old Iron Bridge", "flooded", reporter="v2", team="Team 2")
+        r2 = await field_ops.report_road(ORG, OTHER, "flooded", reporter="v2", team="Team 2")
         assert r2["status"] == "flooded"
     finally:
-        await routing.set_road_status("Old Iron Bridge", before or "open")
+        await routing.set_road_status(OTHER, before or "open")
         await query("region", "MATCH (p:Report {org:$o}) DELETE p", {"o": ORG})

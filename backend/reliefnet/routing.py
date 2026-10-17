@@ -6,6 +6,7 @@ ranking candidate paths, so one org's lessons never change another's routes."""
 from __future__ import annotations
 
 import heapq
+import json
 import time
 
 from rapidfuzz import fuzz, process
@@ -86,6 +87,7 @@ async def route(src: str, dst: str, penalties: dict[str, float] | None = None, k
         " YIELD path, pathWeight"
         " RETURN pathWeight AS weight,"
         " [n IN nodes(path) | [n.lat, n.lon]] AS coords,"
+        " [r IN relationships(path) | r.geom] AS geoms,"
         " [r IN relationships(path) | r.name] AS names,"
         " [r IN relationships(path) | r.length_m] AS lens",
         {"src": src, "dst": dst, "k": k + 3 if penalties else k},
@@ -93,6 +95,8 @@ async def route(src: str, dst: str, penalties: dict[str, float] | None = None, k
     )
     if not rows:
         return None
+    for r in rows:
+        r["coords"] = join_shapes(r["coords"], r.pop("geoms"))
     penalties = penalties or {}
     if penalties and any(n in penalties for r in rows for n in r["names"]):
         # k-shortest paths tend to be near-copies of each other, so a detour
@@ -128,7 +132,7 @@ async def _dijkstra(src: str, dst: str, penalties: dict[str, float]) -> dict | N
         REGION_GRAPH,
         "MATCH (a:Junction)-[r:ROAD]->(b:Junction)"
         " RETURN a.id AS a, b.id AS b, r.name AS name, r.cost AS cost, r.length_m AS len,"
-        " [a.lat, a.lon] AS pa, [b.lat, b.lon] AS pb",
+        " [a.lat, a.lon] AS pa, [b.lat, b.lon] AS pb, r.geom AS geom",
         readonly=True,
     )
     adj: dict[str, list[dict]] = {}
@@ -163,17 +167,41 @@ async def _dijkstra(src: str, dst: str, penalties: dict[str, float]) -> dict | N
     path.reverse()
     return {
         "weight": sum(e["cost"] for e in path),
-        "coords": [pos[src]] + [pos[e["b"]] for e in path],
+        "coords": join_shapes([pos[src]] + [pos[e["b"]] for e in path], [e["geom"] for e in path]),
         "names": [e["name"] for e in path],
         "lens": [e["len"] for e in path],
     }
 
 
+def join_shapes(nodes: list[list[float]], geoms: list[str | None]) -> list[list[float]]:
+    """A path's full shape: each road's stored shape, or a straight line where a road has none."""
+    out = [nodes[0]]
+    for i, raw in enumerate(geoms):
+        shape = json.loads(raw) if raw else []
+        if len(shape) < 2:
+            out.append(nodes[i + 1])
+            continue
+        # The path may run along a road against its stored direction.
+        if _d2(shape[-1], out[-1]) < _d2(shape[0], out[-1]):
+            shape = shape[::-1]
+        out.extend(shape[1:])
+    return out
+
+
+def _d2(p: list[float], q: list[float]) -> float:
+    return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
+
+
 async def snapshot() -> list[dict]:
-    return await query(
+    rows = await query(
         REGION_GRAPH,
         "MATCH (a:Junction)-[r:ROAD]->(b:Junction) WHERE a.id < b.id"
         " RETURN r.id AS id, r.name AS name, r.kind AS kind, r.status AS status, r.low_lying AS low_lying,"
-        " [[a.lat, a.lon], [b.lat, b.lon]] AS coords",
+        " [[a.lat, a.lon], [b.lat, b.lon]] AS coords, r.geom AS geom",
         readonly=True,
     )
+    for r in rows:
+        shape = json.loads(r.pop("geom") or "[]")
+        if len(shape) >= 2:
+            r["coords"] = shape if _d2(shape[0], r["coords"][0]) <= _d2(shape[-1], r["coords"][0]) else shape[::-1]
+    return rows

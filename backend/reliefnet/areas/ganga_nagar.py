@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
 
+from . import DrillScript, Junction, Region, Road, TeamBase, haversine_m
+
+NAME = "ganga_nagar"
 BASE_LAT = 25.6200
 BASE_LON = 85.1000
 DLAT = 0.0034  # ~380 m
@@ -32,45 +34,6 @@ LOW_LYING_ROWS = {3, 4}
 
 def col_name(c: int) -> str:
     return "NH-12" if c == 5 else f"Lane {c + 1}"
-
-
-@dataclass
-class Junction:
-    id: str
-    lat: float
-    lon: float
-    row: int
-    col: int
-
-
-@dataclass
-class Road:
-    id: str
-    a: str
-    b: str
-    name: str
-    kind: str
-    low_lying: bool
-    length_m: float
-
-
-@dataclass
-class Region:
-    junctions: list[Junction] = field(default_factory=list)
-    roads: list[Road] = field(default_factory=list)
-    wards: list[dict] = field(default_factory=list)
-    landmarks: list[dict] = field(default_factory=list)
-    shelters: list[dict] = field(default_factory=list)
-    river: list[list[float]] = field(default_factory=list)
-
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(h))
 
 
 def row_lat(r: int) -> float:
@@ -133,7 +96,8 @@ SHELTERS = [
 
 def build_region(seed: int = 7) -> Region:
     rng = random.Random(seed)
-    reg = Region()
+    reg = Region(name="ganga_nagar", title="Ganga Nagar",
+                 attribution="Ganga Nagar is a fictional town. All data is illustrative.")
     jmap: dict[tuple[int, int], Junction] = {}
     for r in range(ROWS):
         for c in range(COLS):
@@ -142,8 +106,6 @@ def build_region(seed: int = 7) -> Region:
                 id=f"J{r}{c}",
                 lat=row_lat(r) + jit_lat,
                 lon=BASE_LON + c * DLON + rng.uniform(-0.12, 0.12) * DLON,
-                row=r,
-                col=c,
             )
             jmap[(r, c)] = j
             reg.junctions.append(j)
@@ -218,28 +180,52 @@ def build_region(seed: int = 7) -> Region:
         mid = river_center_lat(lon)
         north_edge.append([mid + 0.0011, lon])
         south_edge.append([mid - 0.0011, lon])
-    reg.river = north_edge + south_edge[::-1]
+    reg.water_areas = [{"name": "Ganga", "polygon": north_edge + south_edge[::-1]}]
     for w in reg.wards:
         w.pop("box")
     return reg
 
 
+_J = {j.id: j for j in build_region().junctions}
+
+
+def _base(name: str, supplies: list[str], junction: str, capacity: int) -> TeamBase:
+    return TeamBase(name, supplies, _J[junction].lat, _J[junction].lon, capacity)
+
+
 TEAM_BASES = {
-    # slug -> list of (team name, supplies, base junction, capacity)
     "redcross": [
-        ("Team A", ["food", "water", "boat"], "J15", 3),
-        ("Team B", ["medicine", "water", "first_aid", "baby_food"], "J25", 3),
-        ("Team C", ["boat", "evacuation", "first_aid"], "J52", 2),
-        ("Team D", ["food", "blankets", "water"], "J67", 3),
+        _base("Team A", ["food", "water", "boat"], "J15", 3),
+        _base("Team B", ["medicine", "water", "first_aid", "baby_food"], "J25", 3),
+        _base("Team C", ["boat", "evacuation", "first_aid"], "J52", 2),
+        _base("Team D", ["food", "blankets", "water"], "J67", 3),
     ],
     "local_ngo": [
-        ("Team Alpha", ["food", "water", "blankets"], "J12", 3),
-        ("Team Beta", ["medicine", "first_aid", "baby_food"], "J57", 2),
-        ("Team Gamma", ["boat", "evacuation", "water"], "J48", 2),
+        _base("Team Alpha", ["food", "water", "blankets"], "J12", 3),
+        _base("Team Beta", ["medicine", "first_aid", "baby_food"], "J57", 2),
+        _base("Team Gamma", ["boat", "evacuation", "water"], "J48", 2),
     ],
 }
 
 DEFAULT_TEAMS = [
-    ("Team 1", ["food", "water", "medicine"], "J24", 3),
-    ("Team 2", ["boat", "evacuation", "first_aid"], "J55", 2),
+    _base("Team 1", ["food", "water", "medicine", "blankets"], "J24", 3),
+    _base("Team 2", ["boat", "evacuation", "first_aid"], "J55", 2),
 ]
+
+DRILL = DrillScript(
+    messages=[
+        (0, "whatsapp", "pls help 5 ppl stuck near Shiv mandir ward 12, dadi needs BP medicine, paani ghar mein aa raha hai", "KUMAR"),
+        (4, "phone", "Call note: R. Kumar family, ward 12 near temple, 5 members, water entering house", "KUMAR"),
+        (7, "social", "Ward 12 lane 4: nobody has come here since morning, 3 kids, no food", "LANE4"),
+        (10, "whatsapp", "Das family ward 14 near water tanki, 6 log, nani bimar hai, paani ghar mein aa raha hai, boat bhejo", "DAS"),
+    ],
+    flood_road="NH-12 Bridge",
+    # The south bank floods worse.
+    hotspot_wards=list(range(9, 17)),
+    example_road_report="NH-12 Bridge is flooded",
+    example_help="5 log chhat pe fanse hain, Shiv mandir ke paas ward 12, dadi ko BP ki dawai chahiye",
+)
+
+def route_check() -> tuple[str, str]:
+    """Two junctions whose shortest route uses the drill's flood road, for the routing tests."""
+    return ("J25", "J55")

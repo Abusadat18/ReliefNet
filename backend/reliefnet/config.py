@@ -50,10 +50,19 @@ class Settings(BaseSettings):
     # moved to a stable random spot in the flood zone instead of being ignored. Turn off for a real town.
     demo_snap_pins: bool = True
 
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
+    # The place the region graph describes; see reliefnet/areas. Changing it needs `seed --reset`.
+    area: str = "patna"
+    # Optional. Without a key the dashboard draws its own chart instead of a Google map.
+    google_maps_api_key: str | None = None
+    # Vector Map ID; without one the dashboard uses Google's test id DEMO_MAP_ID.
+    google_maps_map_id: str | None = None
+    # Optional second Map ID whose style shows all places; set it to show the Clean / Detailed switch.
+    google_maps_map_id_detailed: str | None = None
+
+    cors_origins: str ="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"
     # slug:Display name pairs, created on startup.
-    default_orgs: str = "redcross:Red Cross Ganga Nagar,local_ngo:Sahyog Local NGO"
+    default_orgs: str = "redcross:Red Cross Patna,local_ngo:Sahyog Local NGO"
 
 
 @lru_cache

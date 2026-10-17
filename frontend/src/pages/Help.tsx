@@ -13,6 +13,14 @@ export function Help() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ref, setRef] = useState<string | null>(null);
+  const [example, setExample] = useState("");
+
+  useEffect(() => {
+    api
+      .get<{ area?: { example_help: string } }>("/api/config")
+      .then((c) => setExample(c.area?.example_help ?? ""))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     api.get<{ slug: string; name: string }[]>("/api/public/orgs").then((o) => {
@@ -70,7 +78,7 @@ export function Help() {
                 minLength={5}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="e.g. 5 log chhat pe fanse hain, Shiv mandir ke paas ward 12, dadi ko BP ki dawai chahiye"
+                placeholder={example ? `e.g. ${example}` : ""}
               />
             </div>
             <ul>

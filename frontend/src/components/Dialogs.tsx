@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { useSession } from "../auth";
 import { clock } from "../hooks";
 import { Md } from "./Md";
 
@@ -33,6 +34,7 @@ interface SimStatus {
 }
 
 export function DrillDialog({ isAdmin, onClose }: { isAdmin: boolean; onClose: () => void }) {
+  const { config } = useSession();
   const [status, setStatus] = useState<SimStatus | null>(null);
   const [rate, setRate] = useState(20);
   const [autoField, setAutoField] = useState(true);
@@ -66,13 +68,13 @@ export function DrillDialog({ isAdmin, onClose }: { isAdmin: boolean; onClose: (
     <Dialog title="Flood drill" onClose={onClose}>
       <p>
         The drill sends realistic, messy help messages to this organisation, including the same household writing
-        twice. Simulated field teams deliver when they arrive, and two teams report NH-12 Bridge flooded about a
-        minute in.
+        twice. Simulated field teams deliver when they arrive, and two teams report {config?.area.flood_road} flooded
+        about a minute in.
       </p>
       <div className="field">
         <label htmlFor="scenario">Scenario</label>
         <select id="scenario" className="input" value={scenario} onChange={(e) => setScenario(e.target.value as "demo" | "flood")}>
-          <option value="demo">Demo script: Kumar duplicate, lane 4, Das family, bridge flood</option>
+          <option value="demo">Demo script: Kumar duplicate, unserved street, Das family, road flood</option>
           <option value="flood">Random flood: messages only</option>
         </select>
       </div>
