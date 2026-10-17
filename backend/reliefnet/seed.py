@@ -10,10 +10,9 @@ import asyncio
 import json
 import logging
 
-from . import db, events, orgs
+from . import areas, db, events, orgs
 from .config import get_settings
 from .db import REGION_GRAPH, org_graph_name, query
-from .region_data import DEFAULT_TEAMS, TEAM_BASES, build_region
 
 log = logging.getLogger(__name__)
 
@@ -61,30 +60,49 @@ async def ensure_org_schema(slug: str) -> None:
     )
 
 
+async def region_meta() -> dict | None:
+    """What the region graph holds now (area, version, junctions), or None if there is no region graph."""
+    if REGION_GRAPH not in await db.list_graphs():
+        return None
+    rows = await query(REGION_GRAPH, "MATCH (m:Meta) RETURN m.key AS k, m.value AS v", readonly=True)
+    meta = {r["k"]: r["v"] for r in rows}
+    # A region graph without these keys was made before areas existed: it is Ganga Nagar.
+    return {"area": meta.get("area", "ganga_nagar"), "version": meta.get("version", ""),
+            "junctions": meta.get("junctions", "")}
+
+
 async def seed_region(reset: bool = False) -> None:
     if REGION_GRAPH in await db.list_graphs():
-        if not reset and await db.scalar(REGION_GRAPH, "MATCH (j:Junction) RETURN count(j)", default=0):
+        have = await region_meta()
+        current = have["area"] == get_settings().area and have["version"] == areas.version()
+        if not reset and current and await db.scalar(REGION_GRAPH, "MATCH (j:Junction) RETURN count(j)", default=0):
             return
         await db.falkor().select_graph(REGION_GRAPH).delete()
-    reg = build_region()
+    reg = areas.region()
     for stmt in REGION_INDEXES:
         await _safe(REGION_GRAPH, stmt)
     await query(
         REGION_GRAPH,
-        "UNWIND $rows AS j CREATE (:Junction {id:j.id, lat:j.lat, lon:j.lon, row:j.row, col:j.col,"
+        "UNWIND $rows AS j CREATE (:Junction {id:j.id, lat:j.lat, lon:j.lon,"
         " loc: point({latitude:j.lat, longitude:j.lon})})",
         {"rows": [j.__dict__ for j in reg.junctions]},
     )
     # Roads are undirected in reality, so store both directions with the same id.
-    await query(
-        REGION_GRAPH,
-        "UNWIND $rows AS r MATCH (a:Junction {id:r.a}), (b:Junction {id:r.b})"
-        " CREATE (a)-[:ROAD {id:r.id, name:r.name, kind:r.kind, low_lying:r.low_lying, length_m:r.length_m,"
-        " cost:r.length_m, status:'open', updated_at:0}]->(b)"
-        " CREATE (b)-[:ROAD {id:r.id, name:r.name, kind:r.kind, low_lying:r.low_lying, length_m:r.length_m,"
-        " cost:r.length_m, status:'open', updated_at:0}]->(a)",
-        {"rows": [r.__dict__ for r in reg.roads]},
-    )
+    # Each direction keeps the road's shape in its own direction of travel.
+    rows = []
+    for r in reg.roads:
+        geom = r.geom or []
+        rows.append({**r.__dict__, "geom": json.dumps(geom), "rgeom": json.dumps(geom[::-1])})
+    for i in range(0, len(rows), 500):
+        await query(
+            REGION_GRAPH,
+            "UNWIND $rows AS r MATCH (a:Junction {id:r.a}), (b:Junction {id:r.b})"
+            " CREATE (a)-[:ROAD {id:r.id, name:r.name, kind:r.kind, low_lying:r.low_lying, length_m:r.length_m,"
+            " cost:r.length_m, status:'open', updated_at:0, geom:r.geom}]->(b)"
+            " CREATE (b)-[:ROAD {id:r.id, name:r.name, kind:r.kind, low_lying:r.low_lying, length_m:r.length_m,"
+            " cost:r.length_m, status:'open', updated_at:0, geom:r.rgeom}]->(a)",
+            {"rows": rows[i:i + 500]},
+        )
     await query(
         REGION_GRAPH,
         "UNWIND $rows AS w CREATE (:Ward {num:w.num, name:w.name, bank:w.bank, lat:w.lat, lon:w.lon, polygon:w.polygon})",
@@ -102,8 +120,19 @@ async def seed_region(reset: bool = False) -> None:
         " open:true, lat:s.lat, lon:s.lon})",
         {"rows": reg.shelters},
     )
-    await query(REGION_GRAPH, "CREATE (:Meta {key:'river', polygon:$p})", {"p": json.dumps(reg.river)})
-    log.info("region seeded: %d junctions, %d roads", len(reg.junctions), len(reg.roads))
+    meta = {
+        "area": reg.name,
+        "version": areas.version(),
+        "junctions": areas.junction_version(),
+        "title": reg.title,
+        "attribution": reg.attribution,
+        "water_areas": json.dumps(reg.water_areas),
+        "water_lines": json.dumps(reg.water_lines),
+        "rail": json.dumps(reg.rail),
+    }
+    await query(REGION_GRAPH, "UNWIND $rows AS m CREATE (:Meta {key:m.k, value:m.v})",
+                {"rows": [{"k": k, "v": v} for k, v in meta.items()]})
+    log.info("region seeded: %s, %d junctions, %d roads", reg.name, len(reg.junctions), len(reg.roads))
 
 
 async def seed_org(slug: str, name: str, reset: bool = False) -> None:
@@ -115,15 +144,13 @@ async def seed_org(slug: str, name: str, reset: bool = False) -> None:
     await ensure_org_schema(slug)
     if await db.scalar(g, "MATCH (t:Team) RETURN count(t)", default=0):
         return
-    teams = TEAM_BASES.get(slug, DEFAULT_TEAMS)
-    jrows = await query(REGION_GRAPH, "MATCH (j:Junction) RETURN j.id AS id, j.lat AS lat, j.lon AS lon")
-    jpos = {r["id"]: r for r in jrows}
+    teams = areas.team_bases(slug)
+    reg = areas.region()
     rows = []
-    for tname, supplies, base, cap in teams:
-        p = jpos[base]
-        rows.append(
-            {"name": tname, "supplies": supplies, "base": base, "capacity": cap, "lat": p["lat"], "lon": p["lon"]}
-        )
+    for t in teams:
+        j = areas.nearest_junction(reg, t.lat, t.lon)
+        rows.append({"name": t.name, "supplies": t.supplies, "base": j.id, "capacity": t.capacity,
+                     "lat": j.lat, "lon": j.lon})
     await query(
         g,
         "UNWIND $rows AS t CREATE (:Team {name:t.name, supplies:t.supplies, base_junction:t.base, capacity:t.capacity,"
@@ -138,7 +165,7 @@ async def seed_org(slug: str, name: str, reset: bool = False) -> None:
     )
     # Demo volunteers so the field app works before anyone signs up.
     vols = [
-        {"id": f"vol_{slug}_{i}", "name": n, "team": t[0], "phone": None}
+        {"id": f"vol_{slug}_{i}", "name": n, "team": t.name, "phone": None}
         for i, (n, t) in enumerate(zip(_VOLUNTEER_NAMES, teams))
     ]
     await query(
@@ -168,11 +195,24 @@ async def seed_all(reset: bool = False) -> None:
     while not await r.set("rn:lock:seed", "1", nx=True, ex=120):
         await asyncio.sleep(0.5)
     try:
-        await seed_region(reset=reset)
+        have = await region_meta()
+        # Team bases and routes in every org graph point at junction ids. New junctions make them wrong.
+        moved = have is not None and (have["area"] != get_settings().area
+                                      or have["junctions"] != areas.junction_version())
+        if moved:
+            log.warning("The area's junctions changed (%s to %s): rebuilding the region and every org graph",
+                        have["area"], get_settings().area)
+        await seed_region(reset=reset or moved)
         for slug, name in default_org_list():
-            await seed_org(slug, name, reset=reset)
-        if reset:
+            await seed_org(slug, name, reset=reset or moved)
+        if moved:
+            defaults = {s for s, _ in default_org_list()}
+            for org in await orgs.all_orgs():
+                if org["slug"] not in defaults:
+                    await seed_org(org["slug"], org["name"], reset=True)
+        if reset or moved:
             await r.delete("rn:agents")
+            areas.region.cache_clear()
     finally:
         await r.delete("rn:lock:seed")
 

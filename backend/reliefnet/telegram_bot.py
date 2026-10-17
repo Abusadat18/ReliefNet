@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, events, field_ops, orgs
+from . import areas, db, events, field_ops, orgs
 from .agents.field import FieldSession
 from .config import get_settings
 from .db import org_graph_name, query
@@ -80,7 +80,8 @@ class Bot:
         team = found[1]["team"] if found else None
         return (f"Linked. You are {found[1]['name'] if found else 'a volunteer'}"
                 f"{' in ' + team if team else ''}. Send 'tasks' to see your assignments, "
-                "'done R-123 gave water' when you deliver, or 'NH-12 bridge flooded' to report a road.")
+                "'done R-123 gave water' when you deliver, or"
+                f" '{areas.drill().flood_road} flooded' to report a road.")
 
     # ------------------------------------------------------------ handlers
     async def download_photo(self, file_id: str) -> str | None:

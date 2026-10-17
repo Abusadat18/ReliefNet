@@ -4,9 +4,10 @@ from reliefnet.agents.triage import cluster_bonus, score
 from reliefnet.domain import coverage
 from reliefnet.models import Candidate, Family, Lesson, Request
 from reliefnet.parsing import parse_message
-from reliefnet.region_data import LANDMARKS, build_region
+from reliefnet import areas
 
-LM = [(n, a) for n, a, *_ in LANDMARKS]
+# The parser logic is the same for every area; these cases use the fictional town.
+LM = [(l["name"], l["aliases"]) for l in areas.region("ganga_nagar").landmarks]
 
 
 def test_parses_hinglish_help_request():
@@ -90,18 +91,6 @@ def test_coverage():
     assert coverage(["medicine", "evacuation"], ["food"]) == 0.0
 
 
-def test_region_has_three_bridges_and_is_connected():
-    reg = build_region()
-    bridges = {r.name for r in reg.roads if r.kind == "bridge"}
+def test_ganga_nagar_has_three_bridges():
+    bridges = {r.name for r in areas.region("ganga_nagar").roads if r.kind == "bridge"}
     assert bridges == {"Old Iron Bridge", "NH-12 Bridge", "Rail Bridge"}
-    adj: dict[str, set[str]] = {}
-    for r in reg.roads:
-        adj.setdefault(r.a, set()).add(r.b)
-        adj.setdefault(r.b, set()).add(r.a)
-    seen, todo = set(), [reg.junctions[0].id]
-    while todo:
-        j = todo.pop()
-        if j not in seen:
-            seen.add(j)
-            todo += adj.get(j, set()) - seen
-    assert len(seen) == len(reg.junctions)

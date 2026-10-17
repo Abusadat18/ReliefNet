@@ -12,7 +12,7 @@ import time
 from rapidfuzz import fuzz, process
 
 from .db import REGION_GRAPH, query
-from .region_data import haversine_m
+from .areas import haversine_m
 
 _cache: dict[str, tuple[float, object]] = {}
 TTL = 30.0

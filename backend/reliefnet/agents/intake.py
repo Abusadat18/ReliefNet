@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .. import embed, events, field_ops, geo, llm, memory
+from .. import areas, embed, events, field_ops, geo, llm, memory
 from ..db import now_ms, redis
 from ..domain import NEEDS, URGENCY
 from ..models import Message, Request
@@ -38,7 +38,7 @@ class IntakeResult(BaseModel):
     summary_en: str = Field(description="One-line English summary for coordinators")
     language: str
 
-SYSTEM = """You are the Intake agent of ReliefNet, a flood relief coordination system in Ganga Nagar.
+SYSTEM = """You are the Intake agent of ReliefNet, a flood relief coordination system in {area}.
 You read raw help messages from WhatsApp, Telegram, phone call notes and social posts. They are often
 informal Hinglish (Hindi written in Latin script mixed with English) and have typos.
 
@@ -75,7 +75,9 @@ class IntakeAgent(Agent):
             gaz = "\n".join(f"- {l['name']}: {', '.join(l['aliases'])} (ward {l['ward']})" for l in lms)
             from ..routing import road_names
 
-            system = SYSTEM.format(gazetteer=gaz, roads=", ".join(await road_names()))
+            # Generated names ("Lane near Kali Mandir 3") only add tokens; people report named roads.
+            roads = [n for n in await road_names() if not n.startswith(("Lane near ", "Road near "))]
+            system = SYSTEM.format(area=areas.region().title, gazetteer=gaz, roads=", ".join(roads))
             out = await llm.json_call(self.s.model_fast, system, f"Message:\n<<<\n{text}\n>>>", IntakeResult)
             if out:
                 return out.model_dump(), llm.name_of(self.s.model_fast)

@@ -16,10 +16,12 @@ Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coord
    docker compose up -d --build
    ```
 
-4. Open http://localhost:8080 and choose "Shift Coordinator" under Red Cross Ganga Nagar.
+4. Open http://localhost:8080 and choose "Shift Coordinator" under Red Cross Patna.
 5. Click **Flood drill**, then click **Start the drill**.
 
 The first build takes some minutes, because it downloads the multilingual embedding model into the image.
+
+The map shows real streets of Rajendra Nagar and Kankarbagh in Patna. To show a Google map under the layers, add `GOOGLE_MAPS_API_KEY` to `.env` (see [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md)). Without a key, ReliefNet draws its own chart.
 
 | Address | What it is |
 |---|---|
@@ -87,8 +89,8 @@ The drill can also simulate field teams. When "Simulate field teams delivering h
 These steps follow the seven moments of the demo video.
 
 1. **Messages pour in.** Click **Flood drill**, then **Start the drill**. Messy Hinglish and English messages arrive, and households appear on the chart.
-2. **Duplicates merge.** The drill sends "pls help 5 ppl stuck near Shiv mandir ward 12…" and then "R. Kumar family, ward 12 near temple…". The Dedupe agent merges them into one household. Open the household to see the evidence (meaning, distance, ward, people count).
-3. **A bridge floods.** About one minute into the drill, two field teams report NH-12 Bridge flooded. One report marks the bridge "reported". The second report confirms it, the bridge turns magenta, and every affected route goes back to Dispatch for a new route. You can also click any road and mark it flooded yourself.
+2. **Duplicates merge.** The drill sends "pls help 5 ppl stuck near Shiv mandir ward 11 Kankarbagh…" and then "R. Kumar family, ward 11 near temple…". The Dedupe agent merges them into one household. Open the household to see the evidence (meaning, distance, ward, people count).
+3. **A road floods.** About one minute into the drill, two field teams report Malahi Pakdi Road flooded. It is the main road south through Kankarbagh, and it was under water in 2019. One report marks the road "reported". The second report confirms it, the road turns magenta, and every affected route goes back to Dispatch for a detour through the side lanes. You can also click any road and mark it flooded yourself.
 4. **An agent crashes.** Open the **Agents** tab and click **Stop** on a Dispatch agent while it is working. Its lease runs out after 8 seconds, and another Dispatch copy reclaims the request. The log shows "Dispatch-1 reclaimed R-… after Dispatch-2's lease expired". The cartouche counts "Requests reclaimed after a crash".
 5. **Shift change.** Click **Shift handover**, then **Write a briefing now**. The Shift Coordinator also writes one automatically at each time in `SHIFT_TIMES`.
 6. **Ask why.** Type "Why hasn't the Das family been served?" in the bar at the bottom of the chart. The answer follows the household's path through the graph, agent by agent, with the reasons each agent recorded.
@@ -136,13 +138,13 @@ Every request moves through five statuses. Each agent watches one status, does o
 
 | Agent | Moves | What it does | Uses |
 |---|---|---|---|
-| Intake | Message → `NEW` | Reads raw messages in any language mix. Extracts people, needs, location and urgency. Geocodes landmarks with the town's own gazetteer. | Fast model with structured output; rule-based Hinglish parser offline |
+| Intake | Message → `NEW` | Reads raw messages in any language mix. Extracts people, needs, location and urgency. Geocodes landmarks with the area's own gazetteer. | Fast model with structured output; rule-based Hinglish parser offline |
 | Dedupe | `NEW` → `RESOLVED` or `MERGED` | Finds the same household in other words. Scores meaning, distance, ward, landmark, names and household makeup. Asks the smart model on close calls. | FalkorDB vector index; smart model |
 | Triage | `RESOLVED` → `TRIAGED` | Scores priority with reasons (medical, elderly, children, water entering, waiting time). Lifts whole clusters of unserved households. | `algo.labelPropagation` community detection; area lessons |
 | Dispatch | `TRIAGED` → `ASSIGNED` | Picks a team by supplies, route time, load and team lessons. Routes around flooded roads. Hands off to the team's field agent. | `algo.SPpaths` on the shared road graph; road lessons |
 | Field | `ASSIGNED` → `DELIVERED` | Chat for volunteers on the web or Telegram. Records deliveries, road reports, new needs and observations. | Fast model with seven tools (LangChain agent on LangGraph); rule-based intents offline |
 | Shift Coordinator | — | Writes handover briefings. Answers "why" questions from the household's path. | Path queries; smart model |
-| Learner | — | Turns field evidence into typed lessons, for example "NH-12 Bridge floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Smart model plus rules; procedural memory |
+| Learner | — | Turns field evidence into typed lessons, for example "Malahi Pakdi Road floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Smart model plus rules; procedural memory |
 
 Several copies of an agent can run at once, in one process or on many machines. An agent claims an item with a lease in one atomic query, renews the lease while it works, and writes its result only while it still holds the lease. If an agent dies, its lease expires and another copy takes the item. No request is handled twice.
 
@@ -184,9 +186,12 @@ FalkorDB also holds the plain Redis data: the live event stream, counters and ch
 
 The seed step (`seed.py`) creates demo data the first time ReliefNet starts:
 
-- **The region graph:** the fictional town of Ganga Nagar. It has 16 wards, a river with three bridges, about 30 landmarks with local names (for example "Shiv Mandir", also called "temple" or "mandir"), and 4 shelters.
+- **The region graph:** Rajendra Nagar and Kankarbagh in Patna, with real roads from OpenStreetMap: about 2,350 junctions, 3,500 road pieces, 48 bridges and flyovers, the drains and the railway. On top of the roads, ReliefNet adds:
+  - 41 real landmarks with the names people type (for example "Nalanda Medical College Hospital", also called "nmch" or "sarkari aspatal");
+  - 16 wards (simple zones, not the official ward map);
+  - 4 simulated shelters at real stadiums and schools.
 - **Two organisations**, each with teams. Every team has a home base on the map (the black squares) and its own supplies:
-  - Red Cross Ganga Nagar: Team A, B, C and D.
+  - Red Cross Patna: Team A, B, C and D.
   - Sahyog Local NGO: Team Alpha, Beta and Gamma.
 - **One demo volunteer per team**, for example Asha Devi and Imran Khan. In `AUTH_MODE=dev` they appear on the sign-in screen.
 
@@ -199,6 +204,25 @@ To test with your own messages instead of the drill:
 3. In a second browser, sign in as a volunteer and do the field work yourself, for example "done R-101, gave water".
 
 There is no screen yet to create or edit teams. Teams come from the seed step only.
+
+### Map and area
+
+The `AREA` setting selects the place that the shared region graph describes:
+
+- `patna` (default): real roads from OpenStreetMap, stored in `backend/reliefnet/areas/patna.json`.
+- `ganga_nagar`: the original fictional grid town. It needs no downloaded data.
+
+The road data comes from OpenStreetMap, not from Google, for two reasons:
+- Google's terms do not allow you to copy Google's roads into your own database.
+- Google's routing cannot avoid a road that you choose, such as a flooded one.
+
+Dispatch routes with `algo.SPpaths` on the roads in FalkorDB. Routes follow the real shape of each road.
+
+The dashboard draws the same layers in two ways:
+- **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
+- **The built-in chart**, with no key or when Google refuses the key. It works offline.
+
+To add another real flood area, see [docs/AREAS.md](docs/AREAS.md).
 
 ### Sign-in and tenancy
 
@@ -260,6 +284,8 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `LLM_MODE` | `auto` | `auto`, `live` or `mock` |
 | `EMBED_MODE` | `auto` | `fastembed` (multilingual MiniLM) or `hash` |
 | `AUTH_MODE` | `dev` | `dev` or `clerk` |
+| `AREA` | `patna` | The place on the map: `patna` or `ganga_nagar`. A change rebuilds the region and the org graphs. |
+| `GOOGLE_MAPS_API_KEY` | empty | Shows a Google map under the layers. Without it, the built-in chart shows. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
 
@@ -276,14 +302,14 @@ backend/reliefnet/
   field_ops.py      shared graph writes: messages, road reports, deliveries, observations
   routing.py        road state and routing on the shared region graph
   parsing.py        the offline Hinglish message parser
-  region_data.py    the fictional town of Ganga Nagar
+  areas/            the places on the map: patna (real OSM roads), ganga_nagar (fictional), the OSM importer
   sim.py            flood drill and load test
   telegram_bot.py   Telegram field bot
   auth.py           dev sign-in and Clerk tokens; picks the org graph
   seed.py           creates the graphs, indexes and demo data
 backend/tests/      logic tests, graph tests, agent and auth tests
 frontend/src/       React app: operations chart, field app, help form
-docs/               setup guides (Clerk, Telegram)
+docs/               setup guides (Clerk, Telegram, Google Maps, areas)
 docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 ```
 
@@ -298,7 +324,9 @@ docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 | What volunteers can do in chat | `tools()` in `agents/field.py` (each tool is a `@tool` function) |
 | What lessons are learned | `rule_lessons` and the prompt in `agents/learner.py` |
 | A graph query | `memory.py` (agents), `field_ops.py`, `routing.py`, `api.py` |
-| The town, teams or demo volunteers | `region_data.py` and `seed.py` |
+| The area, landmarks, wards, teams or drill story | `areas/patna.py` (see [docs/AREAS.md](docs/AREAS.md)) |
+| The roads of an area | `python -m reliefnet.areas.import_osm patna` |
+| The demo volunteers | `seed.py` |
 | Model provider or model names | `.env`: `MODEL_FAST`, `MODEL_SMART` (see [Language models](#language-models)) |
 | The dashboard | `frontend/src/pages/Ops.tsx` and `frontend/src/components/` |
 
@@ -318,7 +346,8 @@ To look at the raw graphs, open the FalkorDB Browser at http://localhost:3000 an
 
 ## Known limits
 
-- Ganga Nagar is a fictional town. All sample data is illustrative.
+- The roads, bridges, drains and landmark positions are real (OpenStreetMap). The families, messages, teams and shelters are simulated. The wards are simple zones, not the official ward map.
+- A flood report closes every piece of a road with that name. Long roads are not split into sections.
 - The drill compresses time: simulated teams arrive in seconds, not minutes.
 - In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. The language model resolves those close calls.
 - With the lightweight `EMBED_MODE=hash`, some true duplicates stay separate. Use the default `fastembed` mode for the demo.

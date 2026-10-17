@@ -16,12 +16,15 @@ export interface AppConfig {
   embed: string;
   telegram_bot: string | null;
   orgs: { slug: string; name: string }[];
+  area: { name: string; title: string; flood_road: string; example_road_report: string; example_help: string };
+  /** Present only when the server has a Google Maps key. */
+  google_maps: { api_key: string } | null;
 }
 
 export interface Road {
   id: string;
   name: string;
-  kind: "road" | "bridge";
+  kind: "road" | "bridge" | "underpass";
   status: "open" | "reported" | "flooded";
   low_lying: boolean;
   coords: [number, number][];
@@ -62,7 +65,10 @@ export interface Region {
   wards: Ward[];
   landmarks: Landmark[];
   shelters: Shelter[];
-  river: [number, number][];
+  area: { name: string; title: string; attribution: string };
+  water_areas: { name: string; polygon: [number, number][] }[];
+  water_lines: { name: string; kind: string; line: [number, number][] }[];
+  rail: [number, number][][];
 }
 
 export interface FamilyPoint {

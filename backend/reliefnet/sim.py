@@ -14,9 +14,8 @@ import logging
 import random
 from dataclasses import dataclass, field
 
-from . import db, events, field_ops, orgs
+from . import areas, db, events, field_ops, orgs
 from .db import now_ms, org_graph_name, query
-from .region_data import LANDMARKS
 
 log = logging.getLogger(__name__)
 
@@ -48,12 +47,14 @@ class Household:
 def make_households(n: int, seed: int) -> list[Household]:
     rng = random.Random(seed)
     by_ward: dict[int, list[tuple[str, list[str]]]] = {}
-    for name, aliases, ward, *_ in LANDMARKS:
-        by_ward.setdefault(ward, []).append((name, aliases))
+    for lm in areas.region().landmarks:
+        by_ward.setdefault(lm["ward"], []).append((lm["name"], lm["aliases"]))
+    wards = sorted(by_ward)
+    hot = [w for w in areas.drill().hotspot_wards if w in by_ward]
     out = []
     for i in range(n):
-        # The south bank floods worse, so more requests come from wards 9-16.
-        ward = rng.choice(list(range(9, 17)) * 3 + list(range(1, 9)))
+        # The worst-hit wards send most of the requests.
+        ward = rng.choice(hot * 3 + wards)
         lm, aliases = rng.choice(by_ward.get(ward, [("", [])]))
         kids = rng.choice([0, 0, 1, 2, 3, 4])
         elderly = rng.choice([0, 0, 0, 1, 1, 2])
@@ -116,15 +117,13 @@ class SimState:
 
 _sims: dict[str, SimState] = {}
 
-DEMO_SCRIPT = [
-    # (seconds after start, kind, payload)
-    (0, "msg", ("whatsapp", "pls help 5 ppl stuck near Shiv mandir ward 12, dadi needs BP medicine, paani ghar mein aa raha hai", "KUMAR")),
-    (4, "msg", ("phone", "Call note: R. Kumar family, ward 12 near temple, 5 members, water entering house", "KUMAR")),
-    (7, "msg", ("social", "Ward 12 lane 4: nobody has come here since morning, 3 kids, no food", "LANE4")),
-    (10, "msg", ("whatsapp", "Das family ward 14 near water tanki, 6 log, nani bimar hai, paani ghar mein aa raha hai, boat bhejo", "DAS")),
-    (55, "road", ("NH-12 Bridge", "Team A")),
-    (62, "road", ("NH-12 Bridge", "Team C")),
-]
+
+def demo_script() -> list[tuple[int, str, tuple]]:
+    """(seconds after start, kind, payload), in the area's own place names."""
+    d = areas.drill()
+    out = [(at, "msg", (ch, text, hid)) for at, ch, text, hid in d.messages]
+    out += [(at, "road", (d.flood_road, team)) for at, team in zip(d.flood_at_s, d.flood_reporters)]
+    return sorted(out, key=lambda x: x[0])
 
 
 async def _send(st: SimState, channel: str, text: str, hid: str, backdate_min: float = 0) -> None:
@@ -144,7 +143,7 @@ async def _run(st: SimState, seed: int, households: int) -> None:
             queue.append((rng.choice(CHANNELS), v, h.hid))
     rng.shuffle(queue)
     start = asyncio.get_running_loop().time()
-    script = list(DEMO_SCRIPT) if st.scenario == "demo" else []
+    script = demo_script() if st.scenario == "demo" else []
     # A backlog of earlier messages makes waiting times and clusters visible at once.
     backlog = 12 if st.scenario == "demo" else 0
     for _ in range(min(backlog, len(queue))):

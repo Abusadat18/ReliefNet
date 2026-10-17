@@ -7,7 +7,7 @@ from rapidfuzz import fuzz
 from .. import events, llm, memory
 from ..db import redis
 from ..models import Candidate, Request
-from ..region_data import haversine_m
+from ..areas import haversine_m
 from .base import Agent
 
 class ConfirmResult(BaseModel):

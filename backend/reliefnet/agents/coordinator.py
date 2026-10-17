@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from rapidfuzz import fuzz, process
 
-from .. import events, llm, memory
+from .. import areas, events, llm, memory
 from ..config import get_settings
 from ..db import now_ms, redis
 from ..domain import LESSON_KINDS
@@ -14,7 +14,7 @@ from ..models import Family
 from ..routing import snapshot
 from .base import PeriodicAgent
 
-BRIEF_SYSTEM = """You are the Shift Coordinator of ReliefNet, a flood relief operation in Ganga Nagar.
+BRIEF_SYSTEM = """You are the Shift Coordinator of ReliefNet, a flood relief operation in {area}.
 Write the handover briefing for the incoming shift from the data provided. Be concrete: name households,
 wards, teams, roads and numbers. Structure: a 2-sentence situation summary, then sections
 "Top priorities", "Roads", "Teams", "Lessons in effect", "Watch out for". Use short bullet points.
@@ -81,7 +81,7 @@ async def make_briefing(org: str, org_name: str, shift: str | None = None) -> di
     text, how = None, "rules"
     if llm.is_live():
         prompt = f"Org: {org_name}\nShift starting: {shift} at {_clock(now_ms())}\nData:\n{d}"
-        text = await llm.text_call(get_settings().model_smart, BRIEF_SYSTEM, prompt, effort="medium")
+        text = await llm.text_call(get_settings().model_smart, BRIEF_SYSTEM.format(area=areas.region().title), prompt, effort="medium")
         how = llm.name_of(get_settings().model_smart) if text else "rules"
     text = text or render_briefing_rules(org_name, shift, d)
     bid = f"B-{await redis().incr(f'rn:seq:{org}:B')}"

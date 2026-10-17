@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { api } from "../api";
 import { useSession } from "../auth";
 import { ChartMap, type Flash } from "../components/ChartMap";
+import { GoogleMap } from "../components/GoogleMap";
 import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialogs";
 import { FamilyDrawer } from "../components/FamilyDrawer";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
@@ -42,6 +43,7 @@ export function Ops() {
   const [roadPop, setRoadPop] = useState<{ road: Road; x: number; y: number } | null>(null);
   const [roadMsg, setRoadMsg] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [mapFailed, setMapFailed] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<LiveEvent[]>("/api/ops/events?count=200").then(setEvents).catch(() => undefined);
@@ -71,9 +73,9 @@ export function Ops() {
         const name = e.data.road as string;
         const seg = roads.data?.find((r) => r.name === name) ?? region.data?.roads.find((r) => r.name === name);
         if (seg && e.data.status === "flooded") {
-          const [a, b] = seg.coords;
+          const [lat, lon] = seg.coords[Math.floor((seg.coords.length - 1) / 2)];
           const id = `${name}-${e.at}`;
-          setFlashes((f) => [...f, { id, lat: (a[0] + b[0]) / 2, lon: (a[1] + b[1]) / 2 }]);
+          setFlashes((f) => [...f, { id, lat, lon }]);
           window.setTimeout(() => setFlashes((f) => f.filter((x) => x.id !== id)), 3500);
         }
       }
@@ -128,6 +130,24 @@ export function Ops() {
     }
   };
 
+  const mapProps = (r: Region) => ({
+    region: r,
+    snapshot: snapshot.data,
+    selected,
+    focusRequest,
+    flashes,
+    onSelectFamily: openFamily,
+    onRoadClick: (road: Road, at: { x: number; y: number }) => {
+      const box = wrapRef.current!.getBoundingClientRect();
+      setRoadMsg(null);
+      setRoadPop({
+        road,
+        x: Math.min(at.x - box.left + 12, box.width - 256),
+        y: Math.min(at.y - box.top + 12, box.height - 200),
+      });
+    },
+  });
+
   const s = stats.data;
   const fam = s?.families ?? {};
   const totalFam = (fam.SERVED ?? 0) + (fam.ASSIGNED ?? 0) + (fam.UNSERVED ?? 0);
@@ -180,25 +200,18 @@ export function Ops() {
       <div className="ops-body">
         <div className="chart-wrap" ref={wrapRef}>
           {mergedRegion ? (
-            <ChartMap
-              region={mergedRegion}
-              snapshot={snapshot.data}
-              selected={selected}
-              focusRequest={focusRequest}
-              flashes={flashes}
-              onSelectFamily={openFamily}
-              onRoadClick={(road, at) => {
-                const box = wrapRef.current!.getBoundingClientRect();
-                setRoadMsg(null);
-                setRoadPop({
-                  road,
-                  x: Math.min(at.x - box.left + 12, box.width - 256),
-                  y: Math.min(at.y - box.top + 12, box.height - 200),
-                });
-              }}
-            />
+            config?.google_maps && !mapFailed ? (
+              <GoogleMap apiKey={config.google_maps.api_key} onFail={setMapFailed} {...mapProps(mergedRegion)} />
+            ) : (
+              <ChartMap {...mapProps(mergedRegion)} />
+            )
           ) : (
             <p className="empty">{region.error ?? "Loading the chart…"}</p>
+          )}
+          {mapFailed && (
+            <p className="map-note" role="status">
+              {mapFailed}
+            </p>
           )}
 
           <div className="legend" aria-label="Legend">
@@ -220,6 +233,9 @@ export function Ops() {
             <span>
               <i className="line" style={{ borderColor: "var(--waiting)", borderTopStyle: "dashed" }} /> Reported, not confirmed
             </span>
+            <span>
+              <i className="line" style={{ borderColor: "var(--water-ink)", borderTopStyle: "dotted" }} /> Low road near a drain
+            </span>
           </div>
 
           <div className="chart-tools">
@@ -235,7 +251,7 @@ export function Ops() {
           </div>
 
           <section className="cartouche" aria-label="Operation figures">
-            <h2>Ganga Nagar flood operation</h2>
+            <h2>{config?.area.title ?? region.data?.area?.title} flood operation</h2>
             <dl>
               <dt>Households reached</dt>
               <dd className="num">
@@ -263,6 +279,7 @@ export function Ops() {
             <p className="foot">
               Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
               Memory: FalkorDB graph {me ? `org_${me.org}` : ""}.
+              {region.data?.area?.attribution && <> {region.data.area.attribution}.</>}
             </p>
           </section>
 

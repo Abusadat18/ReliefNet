@@ -8,12 +8,16 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from reliefnet import db, llm, routing
+from reliefnet import areas, db, llm, routing
 from reliefnet.agents.field import FieldSession
 from reliefnet.db import query
 from reliefnet.seed import seed_org, seed_region
 
 ORG = "pytest_field"
+
+# Road names and junctions come from the active area (AREA), so the tests run on any map.
+FLOOD = areas.drill().flood_road
+OTHER = sorted(r.name for r in areas.region().roads if r.kind == "bridge" and r.name != FLOOD)[0]
 
 
 class ScriptedModel(BaseChatModel):
@@ -43,9 +47,9 @@ async def org(monkeypatch):
         pytest.skip("FalkorDB not reachable")
     await seed_region()
     await seed_org(ORG, "Pytest Field", reset=True)
-    before = await routing.road_state("Old Iron Bridge")
+    before = await routing.road_state(OTHER)
     yield ORG
-    await routing.set_road_status("Old Iron Bridge", before or "open")
+    await routing.set_road_status(OTHER, before or "open")
     await query("region", "MATCH (p:Report {org:$o}) DELETE p", {"o": ORG})
     await db.falkor().select_graph(f"org_{ORG}").delete()
     await db.redis().hdel("rn:orgs", ORG)
@@ -55,18 +59,18 @@ async def org(monkeypatch):
 async def test_agent_calls_our_tool_and_the_graph_changes(org, monkeypatch):
     model = ScriptedModel(script=[
         AIMessage(content="", tool_calls=[{"name": "report_road", "id": "call_1",
-                                           "args": {"road": "Old Iron Bridge", "status": "flooded"}}]),
-        AIMessage(content="Recorded: Old Iron Bridge is reported flooded."),
+                                           "args": {"road": OTHER, "status": "flooded"}}]),
+        AIMessage(content=f"Recorded: {OTHER} is reported flooded."),
     ])
     monkeypatch.setattr(llm, "is_live", lambda: True)
     monkeypatch.setattr(llm, "chat_model", lambda spec, effort=None: model)
 
     volunteer = {"id": "vol_test", "name": "Test Volunteer", "team": "Team 1", "role": "volunteer"}
-    out = await FieldSession(org, volunteer, "web").reply("old iron bridge par paani bhar gaya")
+    out = await FieldSession(org, volunteer, "web").reply(f"{OTHER.lower()} par paani bhar gaya")
 
-    assert out["reply"] == "Recorded: Old Iron Bridge is reported flooded."
+    assert out["reply"] == f"Recorded: {OTHER} is reported flooded."
     assert [a["tool"] for a in out["actions"]] == ["report_road"]
-    assert await routing.road_state("Old Iron Bridge") == "reported"  # one team's report, not yet confirmed
+    assert await routing.road_state(OTHER) == "reported"  # one team's report, not yet confirmed
     assert model.calls == 2  # tool call, then the final answer
 
 

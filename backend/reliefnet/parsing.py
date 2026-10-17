@@ -41,7 +41,8 @@ WATER_ENTERING = ["water entering", "paani ghar", "pani ghar", "paani aa raha", 
 TRAPPED = ["stuck", "fanse", "phanse", "fasa", "trapped", "chhat", "roof", "cannot get out", "nikal nahi"]
 CRITICAL = ["drowning", "doob raha", "unconscious", "behosh", "dying", "bleeding", "snake", "saanp", "heart attack",
             "pregnant", "labour", "labor pain"]
-ROAD_WORDS = ["bridge", "pul", "road", "sadak", "path", "lane", "nh-12", "nh12", "rasta"]
+ROAD_WORDS = ["bridge", "pul", "road", "sadak", "path", "lane", "nh-12", "nh12", "rasta", "flyover", "setu",
+              "marg", "underpass", "overbridge"]
 FLOOD_WORDS = ["flooded", "flood", "doob", "submerged", "pani bhar", "paani bhar", "under water", "band hai",
                "blocked", "closed", "washed", "tut gaya", "toot"]
 OPEN_WORDS = ["is open", "khul gaya", "open now", "clear now", "cleared", "chalu"]
@@ -111,7 +112,8 @@ def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None =
     is_road_msg = _has(t, ROAD_WORDS) and (_has(t, FLOOD_WORDS) or _has(t, OPEN_WORDS))
     if is_road_msg and not (people or trapped or (needs and needs != ["evacuation"])):
         road_status = "open" if _has(t, OPEN_WORDS) else "flooded"
-        m = re.search(r"(nh-?12 bridge|nh-?12|old iron bridge|rail bridge|[a-z]+ (?:road|path|lane \d+)|lane \d+)", t)
+        m = re.search(r"(nh-?12 bridge|nh-?12|old iron bridge|rail bridge|lane \d+"
+                      r"|(?:[a-z0-9.]+ ){1,3}(?:road|path|marg|flyover|setu|overbridge|underpass|bridge|lane \d+))", t)
         road_name = m.group(1) if m else ""
 
     if "nobody has come" in t or "koi nahi aaya" in t or "no one came" in t or "no help" in t:

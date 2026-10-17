@@ -46,10 +46,15 @@ class Settings(BaseSettings):
     dedupe_ask_llm: float = 0.58
     near_radius_m: float = 450.0
 
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
+    # The place the region graph describes; see reliefnet/areas. Changing it needs `seed --reset`.
+    area: str = "patna"
+    # Optional. Without a key the dashboard draws its own chart instead of a Google map.
+    google_maps_api_key: str | None = None
+
+    cors_origins: str ="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"
     # slug:Display name pairs, created on startup.
-    default_orgs: str = "redcross:Red Cross Ganga Nagar,local_ngo:Sahyog Local NGO"
+    default_orgs: str = "redcross:Red Cross Patna,local_ngo:Sahyog Local NGO"
 
 
 @lru_cache
