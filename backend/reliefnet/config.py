@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str | None = None
     telegram_bot_username: str | None = None
+    telegram_default_org: str | None = None  # slug that receives public bot requests; default: first by slug
 
     # Demo-friendly timings. A real deployment would use longer leases.
     lease_ms: int = 8000
@@ -45,6 +46,9 @@ class Settings(BaseSettings):
     dedupe_auto_merge: float = 0.78
     dedupe_ask_llm: float = 0.58
     near_radius_m: float = 450.0
+    # Ganga Nagar is fictional. A shared pin outside the town (a phone testing from elsewhere) is
+    # moved to a stable random spot in the flood zone instead of being ignored. Turn off for a real town.
+    demo_snap_pins: bool = True
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"

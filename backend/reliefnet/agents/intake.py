@@ -1,11 +1,12 @@
 """Agent 1 - Intake. Raw message -> structured Request (status NEW)."""
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .. import embed, events, field_ops, geo, llm, memory
+from .. import embed, events, field_ops, geo, intake_flow, llm, memory
 from ..db import now_ms, redis
 from ..domain import NEEDS, URGENCY
 from ..models import Message, Request
@@ -81,8 +82,19 @@ class IntakeAgent(Agent):
                 return out.model_dump(), llm.name_of(self.s.model_fast)
         return parse_message(text, await geo.landmark_names()), "rules"
 
+    async def from_form(self, msg: Message) -> tuple[dict, str]:
+        """The bot's guided form: what the person tapped is used as it is.
+
+        The model only reads the free text they typed, for a name or a medical detail."""
+        form = json.loads(msg.form)
+        data = intake_flow.form_to_data(form, ward=msg.ward, landmark=msg.landmark, text=msg.text, lang=msg.lang)
+        if form.get("notes"):
+            parsed, _ = await self.extract(form["notes"])
+            data = intake_flow.merge_notes(data, parsed)
+        return data, "form"
+
     async def process(self, org: str, msg: Message) -> None:
-        data, how = await self.extract(msg.text)
+        data, how = await (self.from_form(msg) if msg.form else self.extract(msg.text))
         kind = data["kind"]
 
         if kind == "road_report" and data.get("road_status"):
@@ -112,7 +124,11 @@ class IntakeAgent(Agent):
     async def to_request(self, org: str, msg: Message, data: dict, how: str) -> Request:
         """Turn the extracted fields into a Request, with a resolved location."""
         name = (data.get("contact_name") or "").strip()
-        loc = await geo.resolve(
+        # A shared pin is exact. Without one (or when it is outside the town), use the ward and landmark.
+        pin = None
+        if msg.lat is not None and msg.lon is not None:
+            pin = await geo.from_pin(msg.lat, msg.lon, int(data.get("ward") or 0), seed=msg.id)
+        loc = pin or await geo.resolve(
             data.get("landmark", ""), int(data.get("ward") or 0), data.get("location_text", ""),
             seed=name + (data.get("landmark") or "") + str(data.get("ward")) + msg.id,
         )
@@ -149,4 +165,10 @@ class IntakeAgent(Agent):
             desc=desc,
             parsed_by=how,
             sim_household=msg.sim_household,
+            phone=msg.phone,
+            phone_kind=msg.phone_kind,
+            alt_phone=msg.alt_phone,
+            loc_source="pin_snapped" if loc.get("snapped") else msg.loc_source,
+            reporter_kind=msg.reporter_kind,
+            reporter_id=msg.reporter_id,
         )

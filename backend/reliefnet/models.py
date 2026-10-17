@@ -29,6 +29,19 @@ class Message(Node):
     status: str = "RAW"
     kind: str | None = None
     sim_household: str = ""
+    # Set when the message comes from the bot's guided form (see intake_flow.Submission).
+    phone: str = ""  # the family's own number, ten digits, for matching households
+    phone_kind: str = ""  # "own" | "contact"
+    alt_phone: str = ""  # a number that only reaches them; never identifies a household
+    lat: float | None = None
+    lon: float | None = None
+    loc_source: str = ""  # "gps" | "manual" | "text"
+    ward: int = 0
+    landmark: str = ""
+    reporter_kind: str = ""  # "self" | "volunteer" | "relay"
+    reporter_id: str = ""
+    lang: str = ""
+    form: str = ""  # JSON of the tapped answers; empty for free-text messages
 
 
 class Request(Node):
@@ -58,6 +71,12 @@ class Request(Node):
     desc: str = ""
     parsed_by: str = ""
     sim_household: str = ""
+    phone: str = ""
+    phone_kind: str = ""
+    alt_phone: str = ""
+    loc_source: str = ""
+    reporter_kind: str = ""
+    reporter_id: str = ""
     # Written by later stages.
     family: str | None = None
     merged_into: str | None = None
