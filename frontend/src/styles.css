@@ -587,51 +587,6 @@ select.input {
   inset: 0;
   background: var(--land);
 }
-.gmap-layer {
-  position: absolute;
-  pointer-events: none;
-}
-.chart.gmap-svg {
-  position: absolute;
-  inset: auto;
-  left: 0;
-  top: 0;
-  width: auto;
-  height: auto;
-  overflow: visible;
-  cursor: inherit;
-  pointer-events: none;
-}
-.gmap-svg [data-click] {
-  pointer-events: auto;
-}
-.gmap-svg .road.bridge {
-  stroke-width: 3;
-  opacity: 0.6;
-}
-.gmap-svg .road.low:not(.bridge):not(.reported):not(.flooded) {
-  stroke: var(--water-ink);
-  stroke-width: 1.5;
-  stroke-dasharray: 2 4;
-  opacity: 0.75;
-}
-.gmap-svg .road-hit:hover + .road,
-.gmap-svg .road-hit:focus-visible + .road {
-  opacity: 1;
-}
-.gmap-svg text {
-  paint-order: stroke;
-  stroke: var(--paper);
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
-.gmap-svg .ward-line {
-  stroke: var(--ink-3);
-  opacity: 0.55;
-}
-.gmap.satellite .ward-line {
-  stroke: var(--paper);
-}
 .maptype {
   position: absolute;
   right: 22px;

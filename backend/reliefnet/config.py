@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     area: str = "patna"
     # Optional. Without a key the dashboard draws its own chart instead of a Google map.
     google_maps_api_key: str | None = None
+    # Vector Map ID; without one the dashboard uses Google's test id DEMO_MAP_ID.
+    google_maps_map_id: str | None = None
 
     cors_origins: str ="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"

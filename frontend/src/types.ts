@@ -18,7 +18,7 @@ export interface AppConfig {
   orgs: { slug: string; name: string }[];
   area: { name: string; title: string; flood_road: string; example_road_report: string; example_help: string };
   /** Present only when the server has a Google Maps key. */
-  google_maps: { api_key: string } | null;
+  google_maps: { api_key: string; map_id: string } | null;
 }
 
 export interface Road {

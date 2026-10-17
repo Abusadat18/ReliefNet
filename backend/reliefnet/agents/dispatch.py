@@ -45,12 +45,12 @@ class DispatchAgent(Agent):
 
         options = [o for t in teams if (o := await self.consider(t, req, dest, penalties, lessons))]
         if not options:
-            await self.release(
-                org, req.id, delay_ms=15_000,
-                props={"blocked_reason": "no team can reach this household; all routes flooded or no supplies"},
-            )
-            await events.publish(org, "unreachable", f"{req.id}: no reachable team right now, retrying in 15 s",
-                                 id=req.id)
+            if any(coverage(req.needs, t.supplies) > 0 for t in teams):
+                why = "every route from a team that can help is flooded"
+            else:
+                why = f"no team carries {', '.join(req.needs) or 'what this household needs'}"
+            await self.release(org, req.id, delay_ms=15_000, props={"blocked_reason": why})
+            await events.publish(org, "unreachable", f"{req.id}: {why}; retrying in 15 s", id=req.id)
             return
 
         best = max(options, key=lambda o: o.score)

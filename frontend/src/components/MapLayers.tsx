@@ -24,11 +24,6 @@ interface Props extends LayerProps {
   /** SVG units per screen pixel. */
   u: number;
   showLabels: boolean;
-  /**
-   * "chart": we draw every road. "basemap": the map below already shows the streets,
-   * so we draw only the roads that carry news (bridges, low ground, reports, floods).
-   */
-  roads: "chart" | "basemap";
 }
 
 /**
@@ -56,15 +51,13 @@ function middle(P: Project, coords: [number, number][]): [number, number] {
   return P(...coords[Math.floor((coords.length - 1) / 2)]);
 }
 
-/** The operational layers. The offline chart and the Google map both draw these. */
+/** The operational layers of the built-in chart. deckLayers.ts draws the same on the Google map. */
 export function MapLayers(props: Props) {
   const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, P, u, showLabels } = props;
-  const basemap = props.roads === "basemap";
   const fams = snapshot?.families ?? [];
   const routes = snapshot?.routes ?? [];
   const focusRoute = routes.find((r) => r.id === focusRequest);
   const structure = (r: Road) => r.kind !== "road";
-  const news = (r: Road) => structure(r) || r.status !== "open" || r.low_lying;
 
   return (
     <>
@@ -100,7 +93,7 @@ export function MapLayers(props: Props) {
                 }
               }}
             />
-            {(!basemap || news(r)) && <path className={cls} d={d} />}
+            <path className={cls} d={d} />
             {r.status === "flooded" && (
               <g className="flood-mark" transform={`translate(${mx} ${my})`}>
                 <line x1={-7 * u} y1={-7 * u} x2={7 * u} y2={7 * u} />

@@ -208,7 +208,7 @@ TEAM_BASES = {
 }
 
 DEFAULT_TEAMS = [
-    _base("Team 1", ["food", "water", "medicine"], "J24", 3),
+    _base("Team 1", ["food", "water", "medicine", "blankets"], "J24", 3),
     _base("Team 2", ["boat", "evacuation", "first_aid"], "J55", 2),
 ]
 

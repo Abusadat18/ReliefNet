@@ -1,15 +1,17 @@
 import { OrganizationSwitcher } from "@clerk/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
 import { ChartMap, type Flash } from "../components/ChartMap";
-import { GoogleMap } from "../components/GoogleMap";
 import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialogs";
 import { FamilyDrawer } from "../components/FamilyDrawer";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { clock, useLiveEvents, useNow, useResource, useThrottled } from "../hooks";
 import type { AgentInfo, Lesson, LiveEvent, QueueItem, Region, Road, Snapshot, Stats, Trace } from "../types";
+
+// deck.gl and the map code load only when the server has a Google Maps key.
+const GoogleMap = lazy(() => import("../components/GoogleMap").then((m) => ({ default: m.GoogleMap })));
 
 type Tab = "queue" | "feed" | "agents" | "lessons";
 
@@ -140,10 +142,11 @@ export function Ops() {
     onRoadClick: (road: Road, at: { x: number; y: number }) => {
       const box = wrapRef.current!.getBoundingClientRect();
       setRoadMsg(null);
+      // Keep the whole card (about 260 px tall) above the question bar.
       setRoadPop({
         road,
-        x: Math.min(at.x - box.left + 12, box.width - 256),
-        y: Math.min(at.y - box.top + 12, box.height - 200),
+        x: Math.max(8, Math.min(at.x - box.left + 12, box.width - 256)),
+        y: Math.max(8, Math.min(at.y - box.top + 12, box.height - 340)),
       });
     },
   });
@@ -201,7 +204,14 @@ export function Ops() {
         <div className="chart-wrap" ref={wrapRef}>
           {mergedRegion ? (
             config?.google_maps && !mapFailed ? (
-              <GoogleMap apiKey={config.google_maps.api_key} onFail={setMapFailed} {...mapProps(mergedRegion)} />
+              <Suspense fallback={<p className="empty">Loading the map…</p>}>
+                <GoogleMap
+                  apiKey={config.google_maps.api_key}
+                  mapId={config.google_maps.map_id}
+                  onFail={setMapFailed}
+                  {...mapProps(mergedRegion)}
+                />
+              </Suspense>
             ) : (
               <ChartMap {...mapProps(mergedRegion)} />
             )

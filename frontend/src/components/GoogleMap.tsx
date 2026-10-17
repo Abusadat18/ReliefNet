@@ -1,7 +1,8 @@
 /// <reference types="google.maps" />
+import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { MapLayers, type LayerProps, type Project } from "./MapLayers";
+import { buildLayers, chartColours } from "./deckLayers";
+import type { LayerProps } from "./MapLayers";
 
 let loading: Promise<void> | null = null;
 const authFailures = new Set<() => void>();
@@ -47,46 +48,26 @@ function useNight(): boolean {
   return night;
 }
 
-// The basemap steps back like the paper of a printed chart, so our layers carry the news.
-// Colours follow the chart tokens in styles.css.
-function chartStyle(night: boolean): google.maps.MapTypeStyle[] {
-  const c = night
-    ? { land: "#1c2a26", road: "#2a3c45", major: "#34505c", water: "#10303f", label: "#74858c", halo: "#0f1a20", park: "#1f3229" }
-    : { land: "#f1ead3", road: "#fbf8ee", major: "#ffffff", water: "#cfe5f1", label: "#7b8a92", halo: "#f7f9f8", park: "#e4e6c8" };
-  return [
-    { elementType: "geometry", stylers: [{ color: c.land }] },
-    { elementType: "labels.text.fill", stylers: [{ color: c.label }] },
-    { elementType: "labels.text.stroke", stylers: [{ color: c.halo }] },
-    { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-    { featureType: "poi", stylers: [{ visibility: "off" }] },
-    { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: c.park }] },
-    { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] },
-    { featureType: "road", elementType: "geometry", stylers: [{ color: c.road }] },
-    { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: c.major }] },
-    { featureType: "road.highway", elementType: "geometry", stylers: [{ color: c.major }] },
-    { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-    { featureType: "water", elementType: "geometry", stylers: [{ color: c.water }] },
-    { featureType: "administrative", elementType: "geometry", stylers: [{ visibility: "off" }] },
-  ];
+interface Props extends LayerProps {
+  apiKey: string;
+  mapId: string;
+  onFail: (why: string) => void;
 }
 
-interface Drawn {
-  P: Project;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  zoom: number;
-}
-
-const PAD = 0.004; // degrees around the area, so markers at the edge are not cut off
-
-export function GoogleMap({ apiKey, onFail, ...props }: LayerProps & { apiKey: string; onFail: (why: string) => void }) {
+/**
+ * Google's vector map with our layers drawn by deck.gl in the map's own WebGL frame,
+ * so households, routes and flood marks stay in place while the map zooms or turns.
+ * The map's look comes from the Map Style linked to the Map ID in Google Cloud.
+ */
+export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
   const { region } = props;
   const boxRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const [layer, setLayer] = useState<HTMLDivElement | null>(null);
-  const [drawn, setDrawn] = useState<Drawn | null>(null);
+  const overlayRef = useRef<GoogleMapsOverlay | null>(null);
+  // The map is made again when the theme changes; this keeps the view across that.
+  const viewRef = useRef<{ center: google.maps.LatLngLiteral; zoom: number } | null>(null);
+  const [ready, setReady] = useState(0);
+  const [zoom, setZoom] = useState(15);
   const [satellite, setSatellite] = useState(false);
   const night = useNight();
 
@@ -94,85 +75,90 @@ export function GoogleMap({ apiKey, onFail, ...props }: LayerProps & { apiKey: s
     const pts = region.wards.flatMap((w) => w.polygon);
     const lats = pts.map((p) => p[0]);
     const lons = pts.map((p) => p[1]);
-    return { s: Math.min(...lats), n: Math.max(...lats), w: Math.min(...lons), e: Math.max(...lons) };
+    return { south: Math.min(...lats), north: Math.max(...lats), west: Math.min(...lons), east: Math.max(...lons) };
   }, [region.wards]);
-
-  const fit = () =>
-    mapRef.current?.fitBounds({ south: bounds.s, west: bounds.w, north: bounds.n, east: bounds.e }, 24);
 
   useEffect(() => {
     let cancelled = false;
-    let overlay: google.maps.OverlayView | null = null;
+    let waiting: google.maps.MapsEventListener | null = null;
     const failed = () => onFail("Google Maps refused the key, so the built-in chart is showing. See docs/GOOGLE_MAPS.md.");
     authFailures.add(failed);
 
     loadMaps(apiKey)
       .then(async () => {
-        const { Map, OverlayView } = (await google.maps.importLibrary("maps")) as google.maps.MapsLibrary;
+        const { Map } = (await google.maps.importLibrary("maps")) as google.maps.MapsLibrary;
         if (cancelled || !boxRef.current) return;
+        const view = viewRef.current;
         const map = new Map(boxRef.current, {
+          mapId,
+          colorScheme: night ? "DARK" : "LIGHT",
+          renderingType: "VECTOR" as google.maps.RenderingType,
+          mapTypeId: satellite ? "hybrid" : "roadmap",
+          center: view?.center,
+          zoom: view?.zoom,
           disableDefaultUI: true,
           clickableIcons: false,
           gestureHandling: "greedy",
           keyboardShortcuts: true,
-          styles: chartStyle(night),
-          backgroundColor: "transparent",
+        });
+        if (!view) map.fitBounds(bounds, 24);
+        map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 15));
+        map.addListener("idle", () => {
+          const c = map.getCenter();
+          if (c) viewRef.current = { center: c.toJSON(), zoom: map.getZoom() ?? 15 };
         });
         mapRef.current = map;
-        map.fitBounds({ south: bounds.s, west: bounds.w, north: bounds.n, east: bounds.e }, 24);
-
-        // One overlay holds our whole SVG. Google moves it while the map pans; we redraw it on zoom.
-        const div = document.createElement("div");
-        div.className = "gmap-layer";
-        class ChartOverlay extends OverlayView {
-          onAdd() {
-            this.getPanes()!.overlayMouseTarget.appendChild(div);
-          }
-          draw() {
-            const proj = this.getProjection();
-            if (!proj) return;
-            const nw = proj.fromLatLngToDivPixel(new google.maps.LatLng(bounds.n + PAD, bounds.w - PAD))!;
-            const se = proj.fromLatLngToDivPixel(new google.maps.LatLng(bounds.s - PAD, bounds.e + PAD))!;
-            const left = nw.x;
-            const top = nw.y;
-            Object.assign(div.style, {
-              left: `${left}px`,
-              top: `${top}px`,
-              width: `${se.x - left}px`,
-              height: `${se.y - top}px`,
-            });
-            const P: Project = (lat, lon) => {
-              const p = proj.fromLatLngToDivPixel(new google.maps.LatLng(lat, lon))!;
-              return [p.x - left, p.y - top];
-            };
-            setDrawn({ P, left, top, width: se.x - left, height: se.y - top, zoom: map.getZoom() ?? 15 });
-          }
-          onRemove() {
-            div.remove();
-          }
+        setZoom(map.getZoom() ?? 15);
+        // deck.gl reads the rendering type once; attach only when the map knows it.
+        const attach = () => {
+          if (cancelled) return;
+          const overlay = new GoogleMapsOverlay({ interleaved: true, layers: [] });
+          overlay.setMap(map);
+          overlayRef.current = overlay;
+          setReady((n) => n + 1);
+        };
+        if (map.getRenderingType() === "UNINITIALIZED") {
+          waiting = google.maps.event.addListenerOnce(map, "renderingtype_changed", attach);
+        } else {
+          attach();
         }
-        overlay = new ChartOverlay();
-        overlay.setMap(map);
-        setLayer(div);
       })
       .catch((e: Error) => onFail(`${e.message} The built-in chart is showing.`));
 
     return () => {
       cancelled = true;
+      waiting?.remove();
       authFailures.delete(failed);
-      overlay?.setMap(null);
+      overlayRef.current?.setMap(null);
+      overlayRef.current?.finalize();
+      overlayRef.current = null;
       mapRef.current = null;
+      if (boxRef.current) boxRef.current.innerHTML = "";
     };
-    // The map is made once per key and area; theme and map type change it in place below.
+    // Colour scheme and rendering mode are fixed when a map is made, and deck.gl picks its
+    // drawing mode once, so a theme or map type change makes a new map at the same view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, bounds]);
+  }, [apiKey, mapId, bounds, night, satellite]);
 
+  const { snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick } = props;
   useEffect(() => {
-    mapRef.current?.setOptions({ styles: chartStyle(night) });
-  }, [night]);
-  useEffect(() => {
-    mapRef.current?.setMapTypeId(satellite ? "hybrid" : "roadmap");
-  }, [satellite]);
+    overlayRef.current?.setProps({
+      layers: buildLayers({
+        region,
+        families: snapshot?.families ?? [],
+        routes: snapshot?.routes ?? [],
+        teams: snapshot?.teams ?? [],
+        pending: snapshot?.pending ?? [],
+        flashes,
+        selected,
+        focusRequest,
+        zoom,
+        colours: chartColours(),
+        onSelectFamily,
+        onRoadClick,
+      }),
+    });
+  }, [ready, region, snapshot, selected, focusRequest, flashes, zoom, night, onSelectFamily, onRoadClick]);
 
   const zoomBy = (d: number) => {
     const m = mapRef.current;
@@ -182,14 +168,6 @@ export function GoogleMap({ apiKey, onFail, ...props }: LayerProps & { apiKey: s
   return (
     <>
       <div ref={boxRef} className={`gmap${satellite ? " satellite" : ""}`} role="region" aria-label={`Map of ${region.area?.title || "the area"}`} />
-      {layer &&
-        drawn &&
-        createPortal(
-          <svg className="chart gmap-svg" width={drawn.width} height={drawn.height} role="img" aria-label="Households, teams, routes and road reports">
-            <MapLayers {...props} P={drawn.P} u={1} showLabels={drawn.zoom >= 16} roads="basemap" />
-          </svg>,
-          layer,
-        )}
       <div className="neatline" aria-hidden="true" />
       <div className="zoom">
         <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>
@@ -198,7 +176,7 @@ export function GoogleMap({ apiKey, onFail, ...props }: LayerProps & { apiKey: s
         <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>
           −
         </button>
-        <button type="button" aria-label="Show the whole area" onClick={fit} style={{ fontSize: 13 }}>
+        <button type="button" aria-label="Show the whole area" onClick={() => mapRef.current?.fitBounds(bounds, 24)} style={{ fontSize: 13 }}>
           ⤢
         </button>
       </div>

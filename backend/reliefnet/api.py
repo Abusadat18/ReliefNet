@@ -76,7 +76,9 @@ async def config():
                  "example_road_report": drill.example_road_report,
                  "example_help": drill.example_help},
         # The browser always receives a Maps JavaScript key; restrict it to your sites in Google Cloud.
-        "google_maps": {"api_key": s.google_maps_api_key} if s.google_maps_api_key else None,
+        "google_maps": {"api_key": s.google_maps_api_key,
+                        "map_id": s.google_maps_map_id or "DEMO_MAP_ID"}
+                       if s.google_maps_api_key else None,
     }
 
 

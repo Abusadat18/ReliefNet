@@ -21,7 +21,7 @@ Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coord
 
 The first build takes some minutes, because it downloads the multilingual embedding model into the image.
 
-The map shows real streets of Rajendra Nagar and Kankarbagh in Patna. To show a Google map under the layers, add `GOOGLE_MAPS_API_KEY` to `.env` (see [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md)). Without a key, ReliefNet draws its own chart.
+The map shows real streets of Rajendra Nagar and Kankarbagh in Patna. To show a Google map under the layers, add `GOOGLE_MAPS_API_KEY` to `.env` (see [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md)). For production, also add a vector Map ID as `GOOGLE_MAPS_MAP_ID`. Without a key, ReliefNet draws its own chart.
 
 | Address | What it is |
 |---|---|
@@ -219,7 +219,7 @@ The road data comes from OpenStreetMap, not from Google, for two reasons:
 Dispatch routes with `algo.SPpaths` on the roads in FalkorDB. Routes follow the real shape of each road.
 
 The dashboard draws the same layers in two ways:
-- **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
+- **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. A vector Map ID (`GOOGLE_MAPS_MAP_ID`) keeps the layers smooth when you zoom. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
 - **The built-in chart**, with no key or when Google refuses the key. It works offline.
 
 To add another real flood area, see [docs/AREAS.md](docs/AREAS.md).
@@ -286,6 +286,7 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `AUTH_MODE` | `dev` | `dev` or `clerk` |
 | `AREA` | `patna` | The place on the map: `patna` or `ganga_nagar`. A change rebuilds the region and the org graphs. |
 | `GOOGLE_MAPS_API_KEY` | empty | Shows a Google map under the layers. Without it, the built-in chart shows. |
+| `GOOGLE_MAPS_MAP_ID` | empty | Vector Map ID for smooth layers. Without it, the map uses Google's test id `DEMO_MAP_ID`. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
 

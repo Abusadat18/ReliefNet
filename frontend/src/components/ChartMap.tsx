@@ -167,7 +167,7 @@ export function ChartMap(props: LayerProps) {
             </text>
           );
         })}
-        <MapLayers {...props} P={P} u={u} showLabels={showLabels} roads="chart" />
+        <MapLayers {...props} P={P} u={u} showLabels={showLabels} />
       </svg>
       <div className="neatline" aria-hidden="true" />
       <div className="zoom">
