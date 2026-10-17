@@ -10,13 +10,13 @@ The bot is in `backend/reliefnet/telegram_bot.py`. It only needs a bot token.
 ## 1. Set up the bot (one time)
 
 1. In Telegram, open **@BotFather** and send `/newbot`.
-2. Choose a name and a username, for example `ReliefNetGangaBot`.
+2. Choose a name and a username, for example `ReliefNetPatnaBot`.
 3. Copy the token that BotFather gives you (it looks like `123456:ABC-...`). Keep it secret.
 4. Add both values to `.env` in the repository root:
 
    ```
    TELEGRAM_BOT_TOKEN=123456:ABC-...
-   TELEGRAM_BOT_USERNAME=ReliefNetGangaBot
+   TELEGRAM_BOT_USERNAME=ReliefNetPatnaBot
    TELEGRAM_DEFAULT_ORG=redcross
    ```
 
@@ -67,7 +67,12 @@ is accepted right away, and the reply suggests `/start` for faster help.
 
 **Which organisation receives the request:** the one in `TELEGRAM_DEFAULT_ORG`. To send one chat to another organisation, send `/org <slug>` once, for example `/org redcross`.
 
-**Location pins:** Ganga Nagar is a fictional town. A pin that is more than 8 km from the town (for example, a phone testing from another city) is moved to a random spot inside a ward, so the demo works from any phone. The request is marked `pin_snapped` with low location confidence, and Triage asks for a call back. Set `DEMO_SNAP_PINS=false` for a real town. Then such a pin is ignored and the ward and landmark are used.
+**Location pins:** A pin inside the area gives the exact place, the ward and the nearest landmark. A pin more than 8 km from the area is handled by `DEMO_SNAP_PINS`:
+
+- Unset (the default): the rule follows the area. On a real area, for example `AREA=patna`, such a pin is ignored, and the ward and landmark are used. On the fictional `ganga_nagar`, the pin is moved to a random spot inside a ward, so the demo works from a phone in any city.
+- `true` or `false`: always move such a pin, or never move it.
+
+A moved pin is marked `pin_snapped` with low location confidence, and Triage asks for a call back.
 
 ## 3. Use it as a volunteer
 
@@ -86,7 +91,7 @@ The code works one time and expires after 15 minutes.
 |---|---|
 | `tasks` or `/tasks` | You get your team's open assignments, highest priority first. |
 | `done R-123 gave BP tablets and water` | The delivery is recorded. The household turns green on the chart. |
-| `NH-12 bridge flooded` | A road report. A report from a second team confirms the flood and reroutes every affected team. |
+| `Malahi Pakdi Road flooded` | A road report. A report from a second team confirms the flood and reroutes every affected team. |
 | `7 people on a roof near the school, ward 10` | A new request from the field. |
 | A photo, with or without a caption | It is saved as an observation, with the photo, for coordinators. |
 | Your location (Telegram "share location") | It is saved as an observation with coordinates. |
@@ -125,7 +130,7 @@ Turn the flood drill off during this test, so only your own messages are on the 
 2. **Dashboard:** watch the request get triaged and assigned to a team.
 3. **Phone B (volunteer):** link as a volunteer in that team. Wait for the "New assignment" alert.
 4. **Phone B:** reply `done R-... gave food`. The household turns green on the chart.
-5. **Phone B:** send `NH-12 bridge flooded`. Then report it from a volunteer in a second team, or mark it flooded as the coordinator. Watch the routes change.
+5. **Phone B:** send `Malahi Pakdi Road flooded`. Then report it from a volunteer in a second team, or mark it flooded as the coordinator. Watch the routes change.
 
 ## 6. Current limits
 

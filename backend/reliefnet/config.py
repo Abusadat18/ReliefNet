@@ -46,9 +46,10 @@ class Settings(BaseSettings):
     dedupe_auto_merge: float = 0.78
     dedupe_ask_llm: float = 0.58
     near_radius_m: float = 450.0
-    # Ganga Nagar is fictional. A shared pin outside the town (a phone testing from elsewhere) is
-    # moved to a stable random spot in the flood zone instead of being ignored. Turn off for a real town.
-    demo_snap_pins: bool = True
+    # A shared pin far outside the area (a phone testing from elsewhere) is moved to a stable random
+    # spot in the flood zone instead of being ignored. Unset: only for a fictional area (ganga_nagar),
+    # because on a real map such a pin is a real place outside the operation.
+    demo_snap_pins: bool | None = None
 
     # The place the region graph describes; see reliefnet/areas. Changing it needs `seed --reset`.
     area: str = "patna"

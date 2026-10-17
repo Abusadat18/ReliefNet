@@ -293,7 +293,7 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
 | `TELEGRAM_DEFAULT_ORG` | first by slug | Organisation that receives public Telegram requests |
-| `DEMO_SNAP_PINS` | `true` | Move a shared pin outside the town to a random spot inside it (the town is fictional) |
+| `DEMO_SNAP_PINS` | empty | Move a shared pin from far outside the area to a random spot inside it. Empty: only for the fictional `ganga_nagar`. |
 
 ## Repository layout
 

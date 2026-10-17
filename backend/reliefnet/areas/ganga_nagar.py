@@ -11,6 +11,8 @@ import random
 from . import DrillScript, Junction, Region, Road, TeamBase, haversine_m
 
 NAME = "ganga_nagar"
+# Not a real place: pins shared from real phones are snapped into it (see geo.from_pin).
+FICTIONAL = True
 BASE_LAT = 25.6200
 BASE_LON = 85.1000
 DLAT = 0.0034  # ~380 m

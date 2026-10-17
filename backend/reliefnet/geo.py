@@ -13,6 +13,7 @@ from rapidfuzz import fuzz, process
 
 from .config import get_settings
 from .db import REGION_GRAPH, query
+from . import areas
 from .areas import haversine_m
 
 _cache: dict[str, tuple[float, object]] = {}
@@ -115,6 +116,12 @@ async def resolve(landmark: str, ward: int, location_text: str, seed: str) -> di
 
 
 TOWN_RADIUS_M = 8000.0  # a pin further than this from the town is not in the flood area
+
+
+def snap_pins() -> bool:
+    """Move far-away pins into the area? DEMO_SNAP_PINS decides; unset, only for a fictional area."""
+    setting = get_settings().demo_snap_pins
+    return setting if setting is not None else bool(getattr(areas.module(), "FICTIONAL", False))
 NEAR_LANDMARK_M = 250.0
 
 
@@ -125,8 +132,8 @@ def _town_center(wlist: list[dict]) -> tuple[float, float]:
 def snap_point(wlist: list[dict], ward_hint: int, seed: str) -> dict:
     """A stable, believable spot in the flood zone, for a pin that is not in the town.
 
-    The town is fictional, so a phone sharing its real GPS from anywhere else would otherwise
-    put a request outside the map. The ward is the one the person picked, or one chosen from
+    In a fictional area, a phone sharing its real GPS from anywhere else would otherwise
+    put a request outside the map (see `snap_pins`). The ward is the one the person picked, or one chosen from
     `seed`. The same seed always gives the same spot. Marked low confidence, so Triage asks
     for a call back."""
     ward = next((w for w in wlist if w["num"] == ward_hint), None) or wlist[
@@ -144,7 +151,7 @@ async def from_pin(lat: float, lon: float, ward_hint: int = 0, seed: str = "") -
     if wlist:
         clat, clon = _town_center(wlist)
         if haversine_m(lat, lon, clat, clon) > TOWN_RADIUS_M:
-            return snap_point(wlist, ward_hint, seed or f"{lat:.4f},{lon:.4f}") if get_settings().demo_snap_pins else None
+            return snap_point(wlist, ward_hint, seed or f"{lat:.4f},{lon:.4f}") if snap_pins() else None
     near, best = "", NEAR_LANDMARK_M
     for l in await landmarks():
         d = haversine_m(lat, lon, l["lat"], l["lon"])
