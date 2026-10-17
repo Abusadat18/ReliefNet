@@ -71,6 +71,19 @@ Run the tests with `pytest` in `backend/`. The graph tests need FalkorDB on the 
 
 ## The demo, step by step
 
+### What the flood drill does
+
+The flood drill only **writes raw, messy messages** into the inbox, as real people would send them. Some households write twice, in different words. The drill does **not** structure, merge or route anything. The agents do all of that:
+
+1. **Intake** reads each message and pulls out the facts.
+2. **Dedupe** merges messages from the same household.
+3. **Triage** scores the priority.
+4. **Dispatch** picks a team and a route.
+
+The drill can also simulate field teams. When "Simulate field teams delivering help" is on, the drill marks each assignment delivered after its ETA, so deliveries happen with nobody clicking. Turn this option off to deliver by hand from the field app.
+
+### The seven demo moments
+
 These steps follow the seven moments of the demo video.
 
 1. **Messages pour in.** Click **Flood drill**, then **Start the drill**. Messy Hinglish and English messages arrive, and households appear on the chart.
@@ -84,6 +97,38 @@ These steps follow the seven moments of the demo video.
 To show tenancy, sign in as the Sahyog Local NGO coordinator in a second browser. That organisation sees none of the Red Cross households, but it sees the same flooded roads.
 
 ## How it works
+
+### How one message flows
+
+The agents work like an assembly line, not one item at a time. Every stage runs at the same time: while Dispatch routes one request, Intake already reads the next message. Each stage only looks for items in its own status.
+
+```
+message arrives        M-1001  (raw text, status RAW)
+  Intake          ->   R-101   (structured request, NEW)          M-1001 -[BECAME]-> R-101
+  Dedupe          ->   F-201   (household, R-101 is RESOLVED)    R-101 -[FOR]-> F-201
+                       or MERGED into an existing household       R-102 -[DUPLICATE_OF]-> R-101
+  Triage          ->   R-101 TRIAGED, priority 75 with reasons
+  Dispatch        ->   R-101 ASSIGNED to Team B, with a route     R-101 -[ASSIGNED_TO]-> Team B
+  Field (volunteer)->  D-1 delivery, R-101 DELIVERED              Team B -[MADE]-> D-1 -[SERVED]-> F-201
+```
+
+Every step also adds a `PROCESSED_BY` edge with the agent's reason. The "Ask why" feature reads these edges back.
+
+### IDs you will see
+
+Every node has a short, readable ID. The live log and the queue show them.
+
+| Prefix | Example | What it is | Created by |
+|---|---|---|---|
+| `M-` | `M-1001` | A raw **message**, exactly as it arrived | Flood drill, help form, Telegram, "Add message", field chat |
+| `R-` | `R-101` | A structured **request**, extracted from one message | Intake agent |
+| `F-` | `F-201` | A **family** (household). Several requests can point to one family. | Dedupe agent |
+| `D-` | `D-1` | A **delivery** record | Field app, Telegram, or the drill's simulated teams |
+| `O-` | `O-1` | A field **observation** (each volunteer chat message or photo) | Field agent, Telegram |
+| `RP-` | `RP-1` | A **road report** (flooded or open) | Field agent, Intake, a coordinator |
+| `B-` | `B-1` | A shift **briefing** | Shift Coordinator |
+
+Example: two messages about the Kumar family arrive as `M-1001` and `M-1002`. Intake makes `R-101` and `R-102`. Dedupe links both to one family, `F-201`, and marks `R-102` as `MERGED`.
 
 ### The agents
 
@@ -100,6 +145,19 @@ Every request moves through five statuses. Each agent watches one status, does o
 | Learner | — | Turns field evidence into typed lessons, for example "NH-12 Bridge floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Smart model plus rules; procedural memory |
 
 Several copies of an agent can run at once, in one process or on many machines. An agent claims an item with a lease in one atomic query, renews the lease while it works, and writes its result only while it still holds the lease. If an agent dies, its lease expires and another copy takes the item. No request is handled twice.
+
+The default fleet (`python -m reliefnet.workers`) runs these copies:
+
+| Agent | Copies | Names in the Agents tab |
+|---|---|---|
+| Intake | 2 | `Intake-1`, `Intake-2` |
+| Dedupe | 1 | `Dedupe` |
+| Triage | 1 | `Triage` |
+| Dispatch | 4 | `Dispatch-1` to `Dispatch-4` |
+| Learner | 1 (on a timer) | `Learner` |
+| Shift Coordinator | 1 (on a timer) | `Coordinator` |
+
+Dispatch has the most copies, because it is the slowest stage: it routes every team for every request. Several copies also make the crash demo possible. To change the counts, pass flags, for example `python -m reliefnet.workers --dispatch 6 --intake 3`.
 
 ```cypher
 MATCH (r:Request {status:$status})
@@ -122,20 +180,36 @@ Each organisation has its own graph (`org_<slug>`). Roads, landmarks and shelter
 
 FalkorDB also holds the plain Redis data: the live event stream, counters and chat history. ReliefNet needs no other database.
 
+### Demo data
+
+The seed step (`seed.py`) creates demo data the first time ReliefNet starts:
+
+- **The region graph:** the fictional town of Ganga Nagar. It has 16 wards, a river with three bridges, about 30 landmarks with local names (for example "Shiv Mandir", also called "temple" or "mandir"), and 4 shelters.
+- **Two organisations**, each with teams. Every team has a home base on the map (the black squares) and its own supplies:
+  - Red Cross Ganga Nagar: Team A, B, C and D.
+  - Sahyog Local NGO: Team Alpha, Beta and Gamma.
+- **One demo volunteer per team**, for example Asha Devi and Imran Khan. In `AUTH_MODE=dev` they appear on the sign-in screen.
+
+Dispatch assigns work to a **team**, not to one person. Every volunteer in the team sees the assignment in the field app, and in Telegram if linked.
+
+To test with your own messages instead of the drill:
+
+1. Sign in as Org Admin, open **Flood drill**, and click **Erase this organisation's memory**. Do not start the drill.
+2. Send messages through the help form (http://localhost:8080/help), **Add message**, or Telegram.
+3. In a second browser, sign in as a volunteer and do the field work yourself, for example "done R-101, gave water".
+
+There is no screen yet to create or edit teams. Teams come from the seed step only.
+
 ### Sign-in and tenancy
 
 - `AUTH_MODE=dev` shows a list of demo people on the sign-in screen. Use it for local demos only.
-- `AUTH_MODE=clerk` uses Clerk accounts and Clerk Organizations. The active organisation's slug selects the FalkorDB graph. The role selects the screens: `org:admin` is an admin, a custom `org:coordinator` role is a coordinator, and any other member is a volunteer.
+- `AUTH_MODE=clerk` uses Clerk accounts and Clerk Organizations. The active organisation selects the FalkorDB graph. The role selects the screens: `org:admin` is an admin, a custom `org:coordinator` role (paid add-on) is a coordinator, and any other member is a volunteer.
 
 The server always takes the organisation from the verified identity, never from the request body.
 
-To turn on Clerk:
+The Clerk free plan works. On it, invite coordinators as **Admin** and volunteers as **Member**. Admins invite people from the organisation menu in the top bar (**Manage organization > Members**).
 
-1. Create a Clerk application and turn on Organizations.
-2. Add a custom role with the key `org:coordinator`.
-3. Put `CLERK_JWKS_URL`, `CLERK_ISSUER` and `AUTH_MODE=clerk` in `.env`.
-4. Put `VITE_CLERK_PUBLISHABLE_KEY` in `.env` (for Docker) and in `frontend/.env` (for `npm run dev`).
-5. Rebuild the web image.
+For the full setup, the free-plan limits, invitations and troubleshooting, see [docs/CLERK.md](docs/CLERK.md).
 
 ### Language models
 
@@ -160,11 +234,20 @@ The Docker image includes Anthropic, OpenAI and Ollama. The prompts were written
 
 ### Telegram
 
+The Telegram bot has two kinds of users:
+
+- **The public** writes to the bot to ask for help. Each message becomes an `M-` message, and the bot replies with its reference number. By default, public messages go to the first organisation by slug (`local_ngo` with the demo data). Send `/org redcross` to choose another one.
+- **Volunteers** link their account once. Then they chat with the Field agent (deliveries, road reports, photos, locations) and receive a message for each new assignment to their team.
+
+To set it up:
+
 1. Create a bot with @BotFather.
 2. Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` in `.env`.
 3. Start the bot with `python -m reliefnet.telegram_bot` or the Docker `telegram` profile.
 
 The bot uses long polling, so it needs no public URL. A volunteer opens the field app, taps **Link Telegram**, and sends `/link CODE` to the bot. After that, the volunteer's messages go to the Field agent, and new assignments arrive in Telegram. Anyone else who writes to the bot creates a public help request.
+
+For the full setup steps, commands and a two-phone test, see [docs/TELEGRAM.md](docs/TELEGRAM.md).
 
 ## Configuration
 
@@ -186,20 +269,58 @@ All settings are environment variables. `.env.example` lists them with comments.
 backend/reliefnet/
   api.py            HTTP API and live event stream
   workers.py        runs the agent fleet
-  agents/           intake, dedupe, triage, dispatch, field, coordinator, learner, base (leases)
-  field_ops.py      shared graph writes: messages, road reports, deliveries
+  agents/           one file per agent; base.py has the lease runtime shared by all
+  memory.py         every graph query the agents use, as named functions
+  models.py         Pydantic models for graph nodes (Message, Request, Family, Lesson, Team)
+  llm.py            all model calls (LangChain); provider-independent
+  field_ops.py      shared graph writes: messages, road reports, deliveries, observations
   routing.py        road state and routing on the shared region graph
+  parsing.py        the offline Hinglish message parser
   region_data.py    the fictional town of Ganga Nagar
   sim.py            flood drill and load test
   telegram_bot.py   Telegram field bot
-  seed.py           creates the graphs and indexes
-backend/tests/      logic tests and graph tests
+  auth.py           dev sign-in and Clerk tokens; picks the org graph
+  seed.py           creates the graphs, indexes and demo data
+backend/tests/      logic tests, graph tests, agent and auth tests
 frontend/src/       React app: operations chart, field app, help form
+docs/               setup guides (Clerk, Telegram)
 docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 ```
+
+## Where to change things
+
+| You want to change | Go to |
+|---|---|
+| How a message is understood | `agents/intake.py` (model prompt and schema), `parsing.py` (offline rules) |
+| When two requests count as one household | `score_pair` in `agents/dedupe.py`; thresholds `DEDUPE_AUTO_MERGE`, `DEDUPE_ASK_LLM` |
+| How priority is scored | `score` in `agents/triage.py` |
+| How a team is chosen | `consider` in `agents/dispatch.py` |
+| What volunteers can do in chat | `tools()` in `agents/field.py` (each tool is a `@tool` function) |
+| What lessons are learned | `rule_lessons` and the prompt in `agents/learner.py` |
+| A graph query | `memory.py` (agents), `field_ops.py`, `routing.py`, `api.py` |
+| The town, teams or demo volunteers | `region_data.py` and `seed.py` |
+| Model provider or model names | `.env`: `MODEL_FAST`, `MODEL_SMART` (see [Language models](#language-models)) |
+| The dashboard | `frontend/src/pages/Ops.tsx` and `frontend/src/components/` |
+
+## Useful commands
+
+Run these in `backend/` with the virtual environment active.
+
+| Command | What it does |
+|---|---|
+| `python -m reliefnet.seed --reset` | Erase the demo organisations (`DEFAULT_ORGS`) and the road state, then create the demo data again |
+| `python -m reliefnet.workers --dispatch 6` | Run the agent fleet with six Dispatch copies |
+| `python -m reliefnet.sim --org redcross --rate 30 --minutes 5` | Run the flood drill from the command line |
+| `python -m reliefnet.sim --org redcross --burst 500` | Load test: send 500 messages at once |
+| `pytest` | Run the tests (graph tests need FalkorDB) |
+
+To look at the raw graphs, open the FalkorDB Browser at http://localhost:3000 and choose a graph, for example `org_redcross` or `region`.
 
 ## Known limits
 
 - Ganga Nagar is a fictional town. All sample data is illustrative.
 - The drill compresses time: simulated teams arrive in seconds, not minutes.
 - In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. The language model resolves those close calls.
+- With the lightweight `EMBED_MODE=hash`, some true duplicates stay separate. Use the default `fastembed` mode for the demo.
+- There is no screen yet to create or edit teams. Teams come from the seed step.
+- Public Telegram messages go to the first organisation by slug unless the sender uses `/org`.
