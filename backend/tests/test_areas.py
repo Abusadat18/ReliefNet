@@ -23,6 +23,9 @@ def test_area_is_connected_and_complete(name):
 
     names = {r.name for r in reg.roads}
     assert areas.drill(name).flood_road in names
+    # A flood report closes every road with that name, so a generated name must not repeat.
+    generated = [r.name for r in reg.roads if r.name.startswith(("Lane near ", "Road near "))]
+    assert len(generated) == len(set(generated)), "generated road names must be unique"
     src, dst = areas.module(name).route_check()
     assert {src, dst} <= {j.id for j in reg.junctions}
     assert all(lm["ward"] for lm in reg.landmarks), "every landmark must sit inside a ward"

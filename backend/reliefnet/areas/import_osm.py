@@ -333,9 +333,13 @@ def _finish(g: Graph, area, water_lines: list[dict], rail: list, lat0: float) ->
     used: Counter = Counter()
 
     def unique(name: str, lat: float, lon: float) -> str:
+        """A name no other road has: "X", then "X near L", then "X near L 2", "X near L 3", ..."""
         if used[name]:
             base = name if " near " in name else f"{name} near {near(lat, lon)}"
-            name = base if not used[base] else f"{base} {used[base] + 1}"
+            name, n = base, 1
+            while used[name]:
+                n += 1
+                name = f"{base} {n}"
         used[name] += 1
         return name
 
