@@ -2,6 +2,7 @@ import type { Layer } from "@deck.gl/core";
 import { PathStyleExtension, type PathStyleExtensionProps } from "@deck.gl/extensions";
 import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type { FamilyPoint, Landmark, Region, Road, RouteLine, Shelter, TeamPoint, Ward } from "../types";
+import type { Visible } from "./LayersMenu";
 import type { Flash } from "./MapLayers";
 
 type RGBA = [number, number, number, number];
@@ -41,6 +42,7 @@ export interface DeckInput {
   selected: string | null;
   focusRequest: string | null;
   zoom: number;
+  show: Visible;
   colours: Colours;
   onSelectFamily: (id: string) => void;
   onRoadClick: (road: Road, at: { x: number; y: number }) => void;
@@ -68,7 +70,11 @@ function clientPoint(event: unknown, fallback: { x: number; y: number }) {
 export function buildLayers(d: DeckInput): Layer[] {
   const c = d.colours;
   const zoomedIn = d.zoom >= 16;
-  const news = d.region.roads.filter((r) => r.kind !== "road" || r.status !== "open" || r.low_lying);
+  const show = d.show;
+  const news = d.region.roads.filter((r) => r.kind !== "road" || r.status !== "open" || (show.low && r.low_lying));
+  const families = d.families.filter((f) => show.served || f.status !== "SERVED");
+  // The route a coordinator opened stays visible even with routes hidden.
+  const routes = show.routes ? d.routes : d.routes.filter((rt) => rt.id === d.focusRequest);
   const flooded = d.region.roads.filter((r) => r.status === "flooded");
   const roadLabels = [
     ...new Map(
@@ -95,7 +101,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     f.status === "SERVED" ? c.paper : f.status === "ASSIGNED" ? c.route : c.waiting;
   const famLine = (f: FamilyPoint): RGBA =>
     d.selected === f.id ? c.ink : f.status === "SERVED" ? c.served : c.paper;
-  const critical = d.families.filter((f) => f.status !== "SERVED" && (f.priority ?? 0) >= 70);
+  const critical = families.filter((f) => f.status !== "SERVED" && (f.priority ?? 0) >= 70);
 
   const shelterIcon = svgIcon(
     `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M3 20L12 3L21 20Z" fill="${c.hex("--served-soft")}" stroke="${c.hex("--served")}" stroke-width="2"/></svg>`,
@@ -119,18 +125,17 @@ export function buildLayers(d: DeckInput): Layer[] {
   return [
     new PathLayer<Ward, PathStyleExtensionProps<Ward>>({
       id: "wards",
-      data: d.region.wards,
+      data: show.wards ? d.region.wards : [],
       getPath: (w) => [...w.polygon, w.polygon[0]].map(ll),
       getColor: [c.ink3[0], c.ink3[1], c.ink3[2], 150],
       getWidth: 1,
       widthUnits: "pixels",
-      antialiasing: true,
       getDashArray: [8, 8],
       extensions: dashed,
     }),
     new TextLayer<Ward>({
       id: "ward-numbers",
-      data: d.region.wards,
+      data: show.wards ? d.region.wards : [],
       getPosition: (w) => ll(w.polygon[0]),
       getText: (w) => String(w.num),
       getPixelOffset: [12, 14],
@@ -147,7 +152,6 @@ export function buildLayers(d: DeckInput): Layer[] {
       getColor: [0, 0, 0, 0],
       getWidth: 14,
       widthUnits: "pixels",
-      antialiasing: true,
       pickable: true,
       onClick: (info, event) => {
         if (info.object) d.onRoadClick(info.object, clientPoint(event, { x: info.x, y: info.y }));
@@ -161,7 +165,6 @@ export function buildLayers(d: DeckInput): Layer[] {
       getColor: roadColour,
       getWidth: roadWidth,
       widthUnits: "pixels",
-      antialiasing: true,
       capRounded: true,
       jointRounded: true,
       getDashArray: roadDash,
@@ -170,12 +173,11 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new PathLayer<RouteLine, PathStyleExtensionProps<RouteLine>>({
       id: "routes",
-      data: d.routes,
+      data: routes,
       getPath: (rt) => rt.route.map(ll),
       getColor: c.route,
       getWidth: (rt) => (rt.id === d.focusRequest ? 4 : 2.5),
       widthUnits: "pixels",
-      antialiasing: true,
       capRounded: true,
       getDashArray: (rt) => (rt.id === d.focusRequest ? [0, 0] : [1.6, 4]),
       extensions: dashed,
@@ -192,7 +194,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new IconLayer<Shelter>({
       id: "shelters",
-      data: d.region.shelters,
+      data: show.places ? d.region.shelters : [],
       getPosition: (s) => [s.lon, s.lat],
       getIcon: () => shelterIcon,
       getSize: 20,
@@ -201,7 +203,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new TextLayer<Shelter>({
       id: "shelter-names",
-      data: zoomedIn ? d.region.shelters : [],
+      data: zoomedIn && show.places ? d.region.shelters : [],
       getPosition: (s) => [s.lon, s.lat],
       getText: (s) => s.name,
       getPixelOffset: [14, 0],
@@ -212,7 +214,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new ScatterplotLayer<Landmark>({
       id: "landmarks",
-      data: zoomedIn ? d.region.landmarks : [],
+      data: zoomedIn && show.places ? d.region.landmarks : [],
       getPosition: (l) => [l.lon, l.lat],
       getRadius: 2.5,
       radiusUnits: "pixels",
@@ -224,7 +226,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new TextLayer<Landmark>({
       id: "landmark-names",
-      data: zoomedIn ? d.region.landmarks : [],
+      data: zoomedIn && show.places ? d.region.landmarks : [],
       getPosition: (l) => [l.lon, l.lat],
       getText: (l) => l.name,
       getPixelOffset: [6, -8],
@@ -256,7 +258,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new ScatterplotLayer<FamilyPoint>({
       id: "households",
-      data: d.families,
+      data: families,
       getPosition: (f) => [f.lon, f.lat],
       getRadius: radius,
       radiusUnits: "pixels",

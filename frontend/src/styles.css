@@ -444,6 +444,10 @@ select.input {
   stroke: var(--hazard);
   stroke-width: 5;
 }
+.chart .road.low:not(.bridge):not(.reported):not(.flooded) {
+  stroke: var(--water-ink);
+  stroke-dasharray: 2 4;
+}
 .chart .road-hit {
   stroke: transparent;
   stroke-width: 14;
@@ -609,6 +613,53 @@ select.input {
 }
 .maptype button + button {
   border-top: 1px solid var(--rule);
+}
+.maptype.detail {
+  bottom: 276px;
+}
+.layers-menu {
+  position: absolute;
+  top: 70px;
+  right: 22px;
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.layers-toggle {
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 700;
+  cursor: pointer;
+}
+.layers-toggle[aria-expanded="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.layers-list {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 6px;
+  font-size: var(--step--1);
+}
+.layers-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.layers-list input {
+  accent-color: var(--ink);
 }
 .maptype button[aria-pressed="true"] {
   background: var(--ink);

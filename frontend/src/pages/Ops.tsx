@@ -6,6 +6,7 @@ import { ChartMap, type Flash } from "../components/ChartMap";
 import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialogs";
 import { FamilyDrawer } from "../components/FamilyDrawer";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
+import { LayersMenu, useMapLayers } from "../components/LayersMenu";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { clock, useLiveEvents, useNow, useResource, useThrottled } from "../hooks";
 import type { AgentInfo, Lesson, LiveEvent, QueueItem, Region, Road, Snapshot, Stats, Trace } from "../types";
@@ -46,6 +47,7 @@ export function Ops() {
   const [roadMsg, setRoadMsg] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [mapFailed, setMapFailed] = useState<string | null>(null);
+  const [layers, setLayer] = useMapLayers();
 
   useEffect(() => {
     api.get<LiveEvent[]>("/api/ops/events?count=200").then(setEvents).catch(() => undefined);
@@ -138,6 +140,7 @@ export function Ops() {
     selected,
     focusRequest,
     flashes,
+    show: layers,
     onSelectFamily: openFamily,
     onRoadClick: (road: Road, at: { x: number; y: number }) => {
       const box = wrapRef.current!.getBoundingClientRect();
@@ -208,6 +211,7 @@ export function Ops() {
                 <GoogleMap
                   apiKey={config.google_maps.api_key}
                   mapId={config.google_maps.map_id}
+                  mapIdDetailed={config.google_maps.map_id_detailed ?? null}
                   onFail={setMapFailed}
                   {...mapProps(mergedRegion)}
                 />
@@ -247,6 +251,8 @@ export function Ops() {
               <i className="line" style={{ borderColor: "var(--water-ink)", borderTopStyle: "dotted" }} /> Low road near a drain
             </span>
           </div>
+
+          {mergedRegion && <LayersMenu visible={layers} onChange={setLayer} />}
 
           <div className="chart-tools">
             <button type="button" className="btn" onClick={() => setDialog("message")}>

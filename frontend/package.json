@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "@clerk/react": "^6.17.8",
-    "@deck.gl/core": "9.4.0",
-    "@deck.gl/extensions": "9.4.0",
-    "@deck.gl/google-maps": "9.4.0",
-    "@deck.gl/layers": "9.4.0",
+    "@deck.gl/core": "9.3.11",
+    "@deck.gl/extensions": "9.3.11",
+    "@deck.gl/google-maps": "9.3.11",
+    "@deck.gl/layers": "9.3.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"

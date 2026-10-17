@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     google_maps_api_key: str | None = None
     # Vector Map ID; without one the dashboard uses Google's test id DEMO_MAP_ID.
     google_maps_map_id: str | None = None
+    # Optional second Map ID whose style shows all places; set it to show the Clean / Detailed switch.
+    google_maps_map_id_detailed: str | None = None
 
     cors_origins: str ="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"

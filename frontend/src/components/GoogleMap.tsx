@@ -51,15 +51,19 @@ function useNight(): boolean {
 interface Props extends LayerProps {
   apiKey: string;
   mapId: string;
+  /** A second Map ID whose style shows all of Google's places; enables the Clean / Detailed switch. */
+  mapIdDetailed: string | null;
   onFail: (why: string) => void;
 }
 
 /**
- * Google's vector map with our layers drawn by deck.gl in the map's own WebGL frame,
+ * Google's vector map with our layers drawn by deck.gl in step with every map frame,
  * so households, routes and flood marks stay in place while the map zooms or turns.
  * The map's look comes from the Map Style linked to the Map ID in Google Cloud.
  */
-export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
+const DETAIL_STORE = "reliefnet.mapDetail";
+
+export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Props) {
   const { region } = props;
   const boxRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -69,6 +73,23 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
   const [ready, setReady] = useState(0);
   const [zoom, setZoom] = useState(15);
   const [satellite, setSatellite] = useState(false);
+  const [detailed, setDetailed] = useState(() => {
+    try {
+      return localStorage.getItem(DETAIL_STORE) === "detailed";
+    } catch {
+      return false;
+    }
+  });
+  const chooseDetail = (on: boolean) => {
+    setDetailed(on);
+    try {
+      localStorage.setItem(DETAIL_STORE, on ? "detailed" : "clean");
+    } catch {
+      /* not kept in private mode */
+    }
+  };
+  // Google takes a map's look only from its Map ID, so each look is its own Map ID.
+  const activeMapId = detailed && mapIdDetailed ? mapIdDetailed : mapId;
   const night = useNight();
 
   const bounds = useMemo(() => {
@@ -90,7 +111,7 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
         if (cancelled || !boxRef.current) return;
         const view = viewRef.current;
         const map = new Map(boxRef.current, {
-          mapId,
+          mapId: activeMapId,
           colorScheme: night ? "DARK" : "LIGHT",
           renderingType: "VECTOR" as google.maps.RenderingType,
           mapTypeId: satellite ? "hybrid" : "roadmap",
@@ -112,7 +133,11 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
         // deck.gl reads the rendering type once; attach only when the map knows it.
         const attach = () => {
           if (cancelled) return;
-          const overlay = new GoogleMapsOverlay({ interleaved: true, layers: [] });
+          // Not interleaved: deck.gl's vector path makes its Deck in the positioning overlay's
+          // onAdd, before Google hands over its GL context, and then ignores that context
+          // (deck.gl 9.3/9.4), so nothing draws. Its own canvas still takes the camera from
+          // Google's WebGL overlay on every frame, so the layers follow the zoom.
+          const overlay = new GoogleMapsOverlay({ interleaved: false, layers: [] });
           overlay.setMap(map);
           overlayRef.current = overlay;
           setReady((n) => n + 1);
@@ -138,9 +163,9 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
     // Colour scheme and rendering mode are fixed when a map is made, and deck.gl picks its
     // drawing mode once, so a theme or map type change makes a new map at the same view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, mapId, bounds, night, satellite]);
+  }, [apiKey, activeMapId, bounds, night, satellite]);
 
-  const { snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick } = props;
+  const { snapshot, selected, focusRequest, flashes, show, onSelectFamily, onRoadClick } = props;
   useEffect(() => {
     overlayRef.current?.setProps({
       layers: buildLayers({
@@ -153,12 +178,13 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
         selected,
         focusRequest,
         zoom,
+        show,
         colours: chartColours(),
         onSelectFamily,
         onRoadClick,
       }),
     });
-  }, [ready, region, snapshot, selected, focusRequest, flashes, zoom, night, onSelectFamily, onRoadClick]);
+  }, [ready, region, snapshot, selected, focusRequest, flashes, zoom, night, show, onSelectFamily, onRoadClick]);
 
   const zoomBy = (d: number) => {
     const m = mapRef.current;
@@ -188,6 +214,16 @@ export function GoogleMap({ apiKey, mapId, onFail, ...props }: Props) {
           Satellite
         </button>
       </div>
+      {mapIdDetailed && !satellite && (
+        <div className="maptype detail" role="group" aria-label="Places on the map">
+          <button type="button" aria-pressed={!detailed} onClick={() => chooseDetail(false)} title="Hide shops, food and hotels">
+            Clean
+          </button>
+          <button type="button" aria-pressed={detailed} onClick={() => chooseDetail(true)} title="Show all of Google's places">
+            Detailed
+          </button>
+        </div>
+      )}
     </>
   );
 }

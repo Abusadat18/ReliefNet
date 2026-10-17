@@ -222,6 +222,8 @@ The dashboard draws the same layers in two ways:
 - **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. A vector Map ID (`GOOGLE_MAPS_MAP_ID`) keeps the layers smooth when you zoom. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
 - **The built-in chart**, with no key or when Google refuses the key. It works offline.
 
+The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / Detailed** switch also selects the map style.
+
 To add another real flood area, see [docs/AREAS.md](docs/AREAS.md).
 
 ### Sign-in and tenancy
@@ -287,6 +289,7 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `AREA` | `patna` | The place on the map: `patna` or `ganga_nagar`. A change rebuilds the region and the org graphs. |
 | `GOOGLE_MAPS_API_KEY` | empty | Shows a Google map under the layers. Without it, the built-in chart shows. |
 | `GOOGLE_MAPS_MAP_ID` | empty | Vector Map ID for smooth layers. Without it, the map uses Google's test id `DEMO_MAP_ID`. |
+| `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with all of Google's places. It enables the **Clean / Detailed** switch on the map. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
 

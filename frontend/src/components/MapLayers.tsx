@@ -1,4 +1,5 @@
 import type { FamilyPoint, Region, Road, Snapshot } from "../types";
+import type { Visible } from "./LayersMenu";
 
 export interface Flash {
   id: string;
@@ -15,6 +16,8 @@ export interface LayerProps {
   selected: string | null;
   focusRequest: string | null;
   flashes: Flash[];
+  /** Layers this viewer has turned on (the Layers menu). */
+  show: Visible;
   onSelectFamily: (id: string) => void;
   onRoadClick: (road: Road, at: { x: number; y: number }) => void;
 }
@@ -53,18 +56,19 @@ function middle(P: Project, coords: [number, number][]): [number, number] {
 
 /** The operational layers of the built-in chart. deckLayers.ts draws the same on the Google map. */
 export function MapLayers(props: Props) {
-  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, P, u, showLabels } = props;
-  const fams = snapshot?.families ?? [];
-  const routes = snapshot?.routes ?? [];
-  const focusRoute = routes.find((r) => r.id === focusRequest);
+  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, P, u, showLabels, show } = props;
+  const fams = (snapshot?.families ?? []).filter((f) => show.served || f.status !== "SERVED");
+  const routes = show.routes ? snapshot?.routes ?? [] : [];
+  // The route a coordinator opened stays visible even with routes hidden.
+  const focusRoute = (snapshot?.routes ?? []).find((r) => r.id === focusRequest);
   const structure = (r: Road) => r.kind !== "road";
 
   return (
     <>
-      {region.wards.map((w) => (
+      {show.wards && region.wards.map((w) => (
         <path key={`l${w.num}`} className="ward-line" d={line(P, w.polygon, true)} fill="none" />
       ))}
-      {region.wards.map((w) => {
+      {show.wards && region.wards.map((w) => {
         const [x, y] = P(w.polygon[0][0], w.polygon[0][1]);
         return (
           <text key={`t${w.num}`} className="ward-label" x={x + 10 * u} y={y + 18 * u} fontSize={13 * u}>
@@ -75,7 +79,7 @@ export function MapLayers(props: Props) {
 
       {region.roads.map((r) => {
         const d = line(P, r.coords);
-        const cls = `road ${structure(r) ? "bridge" : ""} ${r.low_lying ? "low" : ""} ${r.status !== "open" ? r.status : ""}`;
+        const cls = `road ${structure(r) ? "bridge" : ""} ${r.low_lying && show.low ? "low" : ""} ${r.status !== "open" ? r.status : ""}`;
         const [mx, my] = middle(P, r.coords);
         return (
           <g key={r.id}>
@@ -123,7 +127,7 @@ export function MapLayers(props: Props) {
       ))}
       {focusRoute && <path className="route focus" d={line(P, focusRoute.route)} />}
 
-      {region.shelters.map((s) => {
+      {show.places && region.shelters.map((s) => {
         const [x, y] = P(s.lat, s.lon);
         const k = 9 * u;
         return (
@@ -139,6 +143,7 @@ export function MapLayers(props: Props) {
       })}
 
       {showLabels &&
+        show.places &&
         region.landmarks.map((l) => {
           const [x, y] = P(l.lat, l.lon);
           return (
