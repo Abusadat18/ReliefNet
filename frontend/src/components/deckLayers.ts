@@ -121,8 +121,8 @@ export function buildLayers(d: DeckInput): Layer[] {
     r.status === "flooded" ? c.hazard
     : r.status === "reported" ? c.waiting
     : r.kind !== "road" ? alpha(c.ink, 150)
-    : alpha(c.waterInk, 140);
-  const roadWidth = (r: Road) => (r.status === "flooded" ? 5 : r.status === "reported" ? 3.5 : r.kind !== "road" ? 3 : 1.6);
+    : alpha(c.waterInk, 200);
+  const roadWidth = (r: Road) => (r.status === "flooded" ? 5 : r.status === "reported" ? 3.5 : 3);
   // Dash lengths are in multiples of half the line width; only reported roads dash.
   const roadDash = (r: Road): [number, number] => (r.status === "reported" ? [3.4, 2.9] : [0, 0]);
 

@@ -274,7 +274,7 @@ The dashboard draws the same layers in two ways:
 - **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. A vector Map ID (`GOOGLE_MAPS_MAP_ID`) keeps the layers smooth when you zoom. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
 - **The built-in chart**, with no key or when Google refuses the key. It works offline.
 
-The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / All** switch also selects the map style. The **EN / हिं** switch sets the language of Google's map labels.
+The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / All** switch also selects the map style. Google's map labels are in English. An **EN / हिं** label switch is ready but hidden for now; set `LANG_SWITCH` to `true` in `frontend/src/components/GoogleMap.tsx` to show it.
 
 The map keeps the operation area in focus. It dims the world outside the area and draws a line around it. Households that sit close together on the screen become one bubble with a count; click the bubble to zoom in. A household with priority 70 or more shows its score on a pill. Each team shows its name and its number of jobs. The route of the selected household is bold, and the other routes are faint.
 

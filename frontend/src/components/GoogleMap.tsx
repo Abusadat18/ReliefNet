@@ -11,8 +11,12 @@ let loading: Promise<void> | null = null;
 const authFailures = new Set<() => void>();
 const LANG_STORE = "reliefnet.mapLang";
 type Lang = "en" | "hi";
+// The EN / हिं switch is hidden for now. Labels stay in English, also for a browser that saved Hindi before.
+// Set this to true to bring the switch back.
+const LANG_SWITCH = false;
 
 function readLang(): Lang {
+  if (!LANG_SWITCH) return "en";
   try {
     return localStorage.getItem(LANG_STORE) === "hi" ? "hi" : "en";
   } catch {
@@ -288,15 +292,17 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
             ]}
           />
         )}
-        <Segmented
-          label="Label language"
-          value={lang}
-          onChange={chooseLang}
-          options={[
-            ["en", "EN", "Map labels in English"],
-            ["hi", "हिं", "Map labels in Hindi"],
-          ]}
-        />
+        {LANG_SWITCH && (
+          <Segmented
+            label="Label language"
+            value={lang}
+            onChange={chooseLang}
+            options={[
+              ["en", "EN", "Map labels in English"],
+              ["hi", "हिं", "Map labels in Hindi"],
+            ]}
+          />
+        )}
       </div>
     </>
   );

@@ -139,11 +139,11 @@
   stroke: var(--hazard);
   stroke-width: 5;
 }
-/* Low roads near drains: a thin, calm line, not a dense dash. */
+/* Low roads near drains: a calm solid line, not a dense dash, wide enough to read on the map. */
 .chart .road.low:not(.bridge):not(.reported):not(.flooded) {
   stroke: var(--water-ink);
-  stroke-opacity: 0.6;
-  stroke-width: 1.6;
+  stroke-opacity: 0.8;
+  stroke-width: 3;
 }
 .chart .road-hit {
   stroke: transparent;

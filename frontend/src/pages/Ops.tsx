@@ -86,7 +86,7 @@ function Swatch({ kind }: { kind: string }) {
     case "route":
       return <span className={box}><span className="h-1.5 w-5 rounded-full border border-(--direction-edge)" style={{ background: "var(--direction)" }} /></span>;
     case "low":
-      return <span className={box}><span className="h-0.5 w-5" style={{ background: "var(--water-ink)" }} /></span>;
+      return <span className={box}><span className="h-[3px] w-5 rounded-full" style={{ background: "var(--water-ink)" }} /></span>;
     case "flooded":
       return <span className={box}><span className="h-1 w-5 rounded-full" style={{ background: "var(--hazard)" }} /></span>;
     case "reported":
@@ -520,10 +520,12 @@ export function Ops() {
                     </div>
                   ))}
                 </dl>
-                <p className="num mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
-                  Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
-                  Memory: FalkorDB org_{me?.org}. {region.data?.area?.attribution}
-                </p>
+                {/* The ODbL needs the OpenStreetMap credit wherever our road and place data shows. */}
+                {region.data?.area?.attribution && (
+                  <p className="num mt-1.5 truncate text-[9px] text-muted-foreground" title={region.data.area.attribution}>
+                    Roads and places © OpenStreetMap contributors (ODbL)
+                  </p>
+                )}
               </MapCard>
             </div>
 
