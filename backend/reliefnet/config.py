@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Optional second Map ID whose style shows all places; set it to show the Clean / Detailed switch.
     google_maps_map_id_detailed: str | None = None
 
+    # Show a "Call" button with the household's number to the team that holds the assignment.
+    # Off by default: phone numbers are personal data, and the organisation must decide to share them.
+    field_show_phone: bool = False
+
     cors_origins: str ="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080"
     uploads_dir: str = "uploads"
     # slug:Display name pairs, created on startup.

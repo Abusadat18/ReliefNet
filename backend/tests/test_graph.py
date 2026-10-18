@@ -79,6 +79,31 @@ async def test_flooded_road_is_avoided():
         await db.close()
 
 
+async def test_lesson_override_wins_over_confidence(graph):
+    weak = "area_risk:ward 3:"
+    strong = "area_risk:ward 4:"
+    for key, conf in ((weak, 0.3), (strong, 0.8)):
+        await query(graph, "CREATE (:Lesson {key:$k, kind:'area_risk', text:$k, confidence:$c})", {"k": key, "c": conf})
+    used = lambda ls: {l.key for l in ls}  # noqa: E731
+    assert used(await memory.active_lessons(ORG, ["area_risk"])) == {strong}
+    await memory.set_lesson_override(ORG, weak, "on", "pytest")
+    await memory.set_lesson_override(ORG, strong, "off", "pytest")
+    assert used(await memory.active_lessons(ORG, ["area_risk"])) == {weak}
+    await memory.set_lesson_override(ORG, strong, None, "pytest")
+    assert used(await memory.active_lessons(ORG, ["area_risk"])) == {weak, strong}
+    assert await memory.set_lesson_override(ORG, "no such lesson", "on", "pytest") is None
+
+
+async def test_call_number_prefers_the_contact_number(graph):
+    await query(
+        graph,
+        "CREATE (:Request {id:'R-901', phone:'9800000001', alt_phone:'9800000002'}),"
+        " (:Request {id:'R-902', phone:'9800000003', alt_phone:''}), (:Request {id:'R-903'})",
+    )
+    numbers = await field_ops.call_numbers(ORG, ["R-901", "R-902", "R-903"])
+    assert numbers == {"R-901": "9800000002", "R-902": "9800000003"}
+
+
 async def test_lesson_penalty_steers_route():
     try:
         await db.redis().ping()

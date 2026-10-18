@@ -203,6 +203,18 @@ async def team_assignments(org: str, team: str) -> list[dict]:
     )
 
 
+async def call_numbers(org: str, request_ids: list[str]) -> dict[str, str]:
+    """The number a team calls for each request: the contact number first, then the household's own."""
+    rows = await query(
+        org_graph_name(org),
+        "MATCH (r:Request) WHERE r.id IN $ids"
+        " RETURN r.id AS id, CASE WHEN coalesce(r.alt_phone, '') <> '' THEN r.alt_phone ELSE r.phone END AS number",
+        {"ids": request_ids},
+        readonly=True,
+    )
+    return {r["id"]: r["number"] for r in rows if r["number"]}
+
+
 async def nearest_shelters(lat: float, lon: float, limit: int = 3) -> list[dict]:
     return await query(
         REGION_GRAPH,

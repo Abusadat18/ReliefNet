@@ -11,6 +11,7 @@ import secrets
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import areas, auth, db, events, field_ops, gazetteer, geo, llm, orgs, routing, sim
+from . import areas, auth, db, events, field_ops, gazetteer, geo, llm, memory, orgs, routing, sim
 from .agents.base import AGENTS_KEY, cmd_key
 from .agents.coordinator import answer_why, family_trace, make_briefing
 from .agents.field import FieldSession, history
@@ -243,7 +244,7 @@ async def stats(user: User = Depends(require("coordinator"))):
         pairs = lambda c: sum(n * (n - 1) // 2 for n in c.values())  # noqa: E731
         pairs_same_h, pairs_same_f, pairs_both = pairs(ch), pairs(cf), pairs(cb)
     m = await events.metrics(user.org)
-    lessons = await db.scalar(g, "MATCH (l:Lesson) WHERE l.confidence >= 0.5 RETURN count(l)", default=0)
+    lessons = await db.scalar(g, f"MATCH (l:Lesson) WHERE {memory.LESSON_IN_USE} RETURN count(l)", {"min": 0.5}, default=0)
     return {
         "requests": req,
         "messages": msg,
@@ -311,10 +312,26 @@ async def lessons(user: User = Depends(require("coordinator"))):
         "MATCH (l:Lesson) OPTIONAL MATCH (l)-[:DERIVED_FROM]->(e) OPTIONAL MATCH (r:Request)-[:USED_LESSON]->(l)"
         " RETURN l.key AS key, l.kind AS kind, l.text AS text, l.target AS target, l.need AS need,"
         " l.confidence AS confidence, l.seen AS seen, l.created_at AS created_at, l.updated_at AS updated_at,"
-        " l.by AS by, collect(DISTINCT e.id) AS evidence, count(DISTINCT r) AS used"
+        " l.by AS by, l.override AS override, l.override_by AS override_by,"
+        " collect(DISTINCT e.id) AS evidence, count(DISTINCT r) AS used"
         " ORDER BY l.confidence DESC",
         readonly=True,
     )
+
+
+class LessonOverrideIn(BaseModel):
+    # "on" applies the lesson at any confidence, "off" dismisses it, null gives it back to its confidence.
+    override: Literal["on", "off"] | None = None
+
+
+@app.post("/api/ops/lessons/{key}/override")
+async def lesson_override(key: str, body: LessonOverrideIn, user: User = Depends(require("coordinator"))):
+    row = await memory.set_lesson_override(user.org, key, body.override, user.name)
+    if not row:
+        raise HTTPException(404, "unknown lesson")
+    what = {"on": "applied", "off": "dismissed", None: "gave back to its confidence"}[body.override]
+    await events.publish(user.org, "lesson", f"{user.name} {what} the lesson: {row['text']}", key=key, override=body.override)
+    return await lessons(user)
 
 
 @app.post("/api/ops/learn")
@@ -568,6 +585,10 @@ class ChatIn(BaseModel):
 @app.get("/api/field/me")
 async def field_me(user: User = Depends(current_user)):
     assignments = await field_ops.team_assignments(user.org, user.team) if user.team else []
+    if assignments and get_settings().field_show_phone:
+        numbers = await field_ops.call_numbers(user.org, [a["id"] for a in assignments])
+        for a in assignments:
+            a["call"] = numbers.get(a["id"])
     linked = await db.scalar(
         org_graph_name(user.org), "MATCH (v:Volunteer {id:$id}) RETURN v.telegram_chat_id", {"id": user.id}
     )

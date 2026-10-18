@@ -279,15 +279,31 @@ async def household_communities(org: str) -> list[dict]:
         return []
 
 
+# A coordinator's override wins over confidence: 'on' applies a lesson, 'off' never applies it.
+LESSON_IN_USE = "coalesce(l.override, '') <> 'off' AND (l.override = 'on' OR l.confidence >= $min)"
+
+
 async def active_lessons(org: str, kinds: list[str], min_confidence: float = 0.5) -> list[Lesson]:
-    """Lessons of these kinds that are confident enough to act on."""
+    """Lessons of these kinds that are confident enough to act on, or that a coordinator applied."""
     rows = await query(
         org_graph_name(org),
-        "MATCH (l:Lesson) WHERE l.kind IN $kinds AND l.confidence >= $min RETURN properties(l) AS l",
+        f"MATCH (l:Lesson) WHERE l.kind IN $kinds AND {LESSON_IN_USE} RETURN properties(l) AS l",
         {"kinds": kinds, "min": min_confidence},
         readonly=True,
     )
     return [Lesson.model_validate(r["l"]) for r in rows]
+
+
+async def set_lesson_override(org: str, key: str, override: str | None, by: str) -> dict | None:
+    """Apply ('on') or dismiss ('off') a lesson, or give the decision back to its confidence (None).
+    The Learner keeps updating the confidence; the override stays until a coordinator clears it."""
+    rows = await query(
+        org_graph_name(org),
+        "MATCH (l:Lesson {key:$key}) SET l.override = $o, l.override_by = $by, l.override_at = $now"
+        " RETURN l.key AS key, l.text AS text, l.override AS override",
+        {"key": key, "o": override, "by": by, "now": now_ms()},
+    )
+    return rows[0] if rows else None
 
 
 async def save_priority(org: str, me: Worker, request_id: str, priority: int, reasons: list[str], bonus: int,
