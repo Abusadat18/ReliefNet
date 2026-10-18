@@ -15,7 +15,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { ago, clock, needLabel, useNow } from "../hooks";
-import type { AgentInfo, Lesson, LiveEvent, QueueItem, Trace } from "../types";
+import type { AgentInfo, Lesson, LiveEvent, QueueItem, Stats, Trace, TraceEdge, TraceNode } from "../types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
@@ -68,22 +68,45 @@ function StatusLine({ q, now }: { q: QueueItem; now: number }) {
   );
 }
 
+// FOR and MADE only repeat what the other edges say; the receipt keeps the decisions.
+const RECEIPT_EDGES = new Set(["BECAME", "PROCESSED_BY", "DUPLICATE_OF", "ASSIGNED_TO", "HANDED_OFF", "USED_LESSON", "SERVED"]);
+// Numbers that explain the edge go inside the pattern; the action and status are in the reason already.
+const PATTERN_PROPS = new Set(["DUPLICATE_OF", "ASSIGNED_TO"]);
+
+/** One edge as a Cypher pattern: (R-111)-[:DUPLICATE_OF {score:1.0}]->(R-101). */
+export function edgePattern(e: TraceEdge, nodes: TraceNode[]) {
+  const name = (id: string) => {
+    const n = nodes.find((x) => x.id === id);
+    return n?.label === "Lesson" ? `Lesson '${id}'` : id;
+  };
+  const props = PATTERN_PROPS.has(e.type) && e.props ? ` {${e.props}}` : "";
+  return `(${name(e.from)})-[:${e.type}${props}]->(${name(e.to)})`;
+}
+
 /** The household's edges, read from the graph when a receipt opens. */
-function ReceiptDetail({ familyId, onOpen }: { familyId: string; onOpen: OpenFamily }) {
+function ReceiptDetail({ familyId, graphName, onOpen }: { familyId: string; graphName: string; onOpen: OpenFamily }) {
   const [trace, setTrace] = useState<Trace | null>(null);
+  const [readAt, setReadAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     let live = true;
     api
       .get<Trace>(`/api/ops/family/${encodeURIComponent(familyId)}`)
-      .then((t) => live && setTrace(t))
+      .then((t) => {
+        if (!live) return;
+        setTrace(t);
+        setReadAt(Date.now());
+      })
       .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       live = false;
     };
   }, [familyId]);
-  const title = (id: string) => trace?.graph.nodes.find((n) => n.id === id)?.title ?? id;
+  const edges = (trace?.graph.edges ?? [])
+    .filter((e) => RECEIPT_EDGES.has(e.type))
+    .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
+    .slice(-8);
   const cypher =
     `MATCH (r:Request)-[:FOR]->(:Family {id:'${familyId}'})\n` +
     "OPTIONAL MATCH (m:Message)-[:BECAME]->(r)\n" +
@@ -98,25 +121,32 @@ function ReceiptDetail({ familyId, onOpen }: { familyId: string; onOpen: OpenFam
       )}
       {error && <p className="px-3 py-2.5 text-xs text-destructive">{error}</p>}
       {trace && (
-        <ol>
-          {trace.graph.edges.slice(0, 8).map((e, i) => (
-            <li key={i} className="flex gap-2.5 border-b px-3 py-1.5 last:border-b-0">
-              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-foreground/50" aria-hidden="true" />
-              <span className="num text-[10.5px] font-semibold break-all">
-                ({title(e.from)})-[:{e.type}]-&gt;({title(e.to)})
-              </span>
-            </li>
-          ))}
-          {trace.timeline.slice(-3).map((t, i) => (
-            <li key={`t${i}`} className="border-b px-3 py-1.5 text-[11.5px] leading-snug text-muted-foreground last:border-b-0">
-              <span className="num font-semibold text-foreground">{t.who}</span> {t.what}
-            </li>
-          ))}
+        <ol className="px-3 py-2">
+          {edges.map((e, i) => {
+            const last = i === edges.length - 1;
+            return (
+              <li key={i} className="relative flex gap-2.5 pb-2 last:pb-0">
+                {!last && <span className="absolute top-3 bottom-0 left-[2.5px] w-px bg-border" aria-hidden="true" />}
+                <span
+                  className={cn("relative mt-[5px] size-1.5 shrink-0 rounded-full", last ? "bg-primary" : "bg-foreground/40")}
+                  aria-hidden="true"
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className={cn("num text-[10.5px] font-semibold break-all", last && "text-primary")}>
+                    {edgePattern(e, trace.graph.nodes)}
+                  </span>
+                  {e.reason && <span className="text-[11.5px] leading-snug text-muted-foreground">{e.reason}</span>}
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
-      <div className="flex items-center justify-between bg-muted px-3 py-1.5">
-        <span className="num text-[10px] text-muted-foreground">{trace ? `${trace.graph.edges.length} edges` : "FalkorDB"}</span>
-        <span className="flex gap-1">
+      <div className="flex items-center justify-between gap-2 bg-muted px-3 py-1.5">
+        <span className="num min-w-0 truncate text-[10px] text-muted-foreground" title={graphName}>
+          {trace ? `${graphName} · read ${clock(readAt)}` : "FalkorDB"}
+        </span>
+        <span className="flex shrink-0 gap-1">
           <Button
             variant="ghost"
             size="xs"
@@ -137,7 +167,7 @@ function ReceiptDetail({ familyId, onOpen }: { familyId: string; onOpen: OpenFam
   );
 }
 
-export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: OpenFamily }) {
+export function QueuePanel({ items, graphName, onOpen }: { items: QueueItem[]; graphName: string; onOpen: OpenFamily }) {
   const now = useNow(1000);
   const [openReceipt, setOpenReceipt] = useState<string | null>(null);
   if (!items.length)
@@ -148,6 +178,10 @@ export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: Open
     );
   return (
     <div>
+      <p className="flex items-center gap-2 border-b bg-info-soft px-4 py-2 text-xs text-info">
+        <GitBranchIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        Every line below is read from the graph. Open a receipt to see the edges.
+      </p>
       {STAGES.map((st) => {
         const rows = items.filter((i) => i.status === st.status);
         if (!rows.length) return null;
@@ -193,7 +227,7 @@ export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: Open
                       <GraphReceipt edge={r.edge} text={r.text} open={open} onClick={() => setOpenReceipt(open ? null : q.id)} />
                     </div>
                   )}
-                  {open && q.family && <ReceiptDetail familyId={q.family} onOpen={onOpen} />}
+                  {open && q.family && <ReceiptDetail familyId={q.family} graphName={graphName} onOpen={onOpen} />}
                 </div>
               );
             })}
@@ -212,7 +246,7 @@ const TONE: Record<Tone, { row: string; who: string }> = {
   plain: { row: "", who: "text-foreground" },
 };
 
-export function FeedPanel({ events, onOpen }: { events: LiveEvent[]; onOpen: OpenFamily }) {
+export function FeedPanel({ events, graph, onOpen }: { events: LiveEvent[]; graph?: Stats["graph"]; onOpen: OpenFamily }) {
   const [filter, setFilter] = useState<string>("all");
   const rows = events
     .map((e) => ({ e, w: graphWrite(e) }))
@@ -223,7 +257,9 @@ export function FeedPanel({ events, onOpen }: { events: LiveEvent[]; onOpen: Ope
       <div className="flex flex-col gap-2 border-b px-4 py-3">
         <SerifTitle as="h3" sans="Writes to" serif="the graph" className="text-base font-medium" />
         <p className="text-xs text-muted-foreground">
-          Every agent writes to FalkorDB, then publishes the event. Each row shows the edge it wrote.
+          {graph
+            ? `${graph.edges} edges this shift · ${graph.reasons} with a reason. Filter by edge type.`
+            : "Every agent writes to FalkorDB, then publishes the event. Each row shows the edge it wrote."}
         </p>
         <ToggleGroup
           value={[filter]}
@@ -281,7 +317,19 @@ const STATE: Record<AgentInfo["state"], { dot: string; label: string; text: stri
   dead: { dot: "bg-destructive", label: "STOPPED", text: "text-destructive" },
 };
 
-export function AgentsPanel({ agents, queue, onChange }: { agents: AgentInfo[]; queue: QueueItem[]; onChange: () => void }) {
+export function AgentsPanel({
+  agents,
+  queue,
+  events,
+  leaseMs,
+  onChange,
+}: {
+  agents: AgentInfo[];
+  queue: QueueItem[];
+  events: LiveEvent[];
+  leaseMs: number;
+  onChange: () => void;
+}) {
   const now = useNow(1000);
   const [busy, setBusy] = useState<string | null>(null);
   const act = async (name: string, action: "kill" | "revive") => {
@@ -305,8 +353,7 @@ export function AgentsPanel({ agents, queue, onChange }: { agents: AgentInfo[]; 
         <SerifTitle as="h3" sans="Leases live" serif="on the node" className="text-base font-medium" />
         <p className="text-xs leading-relaxed text-muted-foreground">
           An agent claims a request by writing <span className="num">claimed_by</span> and{" "}
-          <span className="num">lease_until</span> on it, and keeps renewing the lease. Stop a Dispatch agent while it
-          works: its lease runs out and another copy takes the request.
+          <span className="num">lease_until</span> on it. If it stops, the lease runs out and another copy takes the item.
         </p>
       </div>
       <div className="flex flex-col gap-2.5 p-3">
@@ -314,6 +361,8 @@ export function AgentsPanel({ agents, queue, onChange }: { agents: AgentInfo[]; 
           const st = STATE[a.state];
           const held = queue.find((q) => q.claimed_by === a.name && (q.lease_until ?? 0) > now);
           const left = held ? Math.max(0, (held.lease_until! - now) / 1000) : 0;
+          const lapsed = !held ? queue.find((q) => q.claimed_by === a.name && q.lease_until && q.lease_until <= now) : undefined;
+          const taken = a.state === "dead" ? events.find((e) => e.kind === "reclaimed" && e.data?.previous === a.name) : undefined;
           const canStop = !(a.kind === "learner" || a.kind === "coordinator");
           return (
             <div
@@ -350,6 +399,32 @@ export function AgentsPanel({ agents, queue, onChange }: { agents: AgentInfo[]; 
                   <span className="font-semibold text-foreground">(:Request {`{id:'${held.id}'}`})</span>
                   <span>&nbsp; claimed_by: '{a.name}'</span>
                   <span className="text-primary">&nbsp; lease_until: now + {left.toFixed(1)} s</span>
+                  <span
+                    className="mt-1 h-1 overflow-hidden rounded-full bg-background"
+                    role="img"
+                    aria-label={`${left.toFixed(1)} s of the lease left`}
+                  >
+                    <span
+                      className="block h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear"
+                      style={{ width: `${Math.min(100, ((left * 1000) / leaseMs) * 100)}%` }}
+                    />
+                  </span>
+                </div>
+              ) : lapsed || taken ? (
+                <div className="num flex flex-col gap-0.5 rounded-lg bg-background/70 px-2.5 py-2 text-[10.5px] text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    (:Request {`{id:'${String(taken?.data?.id ?? lapsed?.id)}'}`}) <span className="text-destructive">lease_until passed</span>
+                  </span>
+                  {taken ? (
+                    <>
+                      <span>({String(taken.data.id)})-[:PROCESSED_BY {"{action:'reclaimed'}"}]</span>
+                      <span>
+                        &nbsp; -&gt;({String(taken.data.agent)}) <span className="font-sans italic">“lease held by {a.name} expired”</span>
+                      </span>
+                    </>
+                  ) : (
+                    <span>Another copy can take it now.</span>
+                  )}
                 </div>
               ) : (
                 <p className="text-[13px] text-muted-foreground">
@@ -383,7 +458,90 @@ type Override = Lesson["override"];
 /** Whether Triage and Dispatch act on a lesson: a coordinator's override wins over confidence. */
 const inUse = (l: Lesson) => l.override !== "off" && (l.override === "on" || l.confidence >= 0.5);
 
-function LessonCard({ l, onOverride }: { l: Lesson; onOverride: (key: string, o: Override) => Promise<void> }) {
+function EdgeBox({ title, edge, children }: { title: string; edge: string; children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-lg border bg-background">
+      <div className="num flex justify-between bg-muted px-3 py-1.5 text-[10px] font-semibold">
+        <span>{title}</span>
+        <span className="text-primary">{edge}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const SHOWN_EVIDENCE = 3;
+
+/** The lesson node with its DERIVED_FROM evidence and the USED_LESSON decisions that cite it. */
+function LessonGraph({ l, onOpen }: { l: Lesson; onOpen: OpenFamily }) {
+  const nodes = l.evidence_nodes ?? l.evidence.map((id) => ({ id, label: "", name: "" }));
+  const rest = nodes.slice(SHOWN_EVIDENCE);
+  const describe = (n: (typeof nodes)[number]) => n.name || (n.label === "Family" ? "Household" : n.label);
+  const row = "flex w-full items-baseline gap-2.5 border-t px-3 py-1.5 text-left";
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="num text-[10.5px] font-semibold text-muted-foreground">(:Lesson {`{key:'${l.key}'}`})</span>
+      {nodes.length > 0 && (
+        <EdgeBox title={`Evidence · ${nodes.length}`} edge="DERIVED_FROM">
+          {nodes.slice(0, SHOWN_EVIDENCE).map((n) =>
+            n.label === "Family" ? (
+              <button key={n.id} type="button" className={cn(row, "hover:bg-muted/50")} onClick={() => onOpen(n.id)}>
+                <span className="num w-12 shrink-0 text-[11px] font-semibold">{n.id}</span>
+                <span className="text-xs text-muted-foreground">{describe(n)}</span>
+              </button>
+            ) : (
+              <div key={n.id} className={row}>
+                <span className="num w-12 shrink-0 text-[11px] font-semibold">{n.id}</span>
+                <span className="text-xs text-muted-foreground">{describe(n)}</span>
+              </div>
+            ),
+          )}
+          {rest.length > 0 && (
+            <div className={row}>
+              <span className="num w-12 shrink-0 text-[11px] font-semibold">+ {rest.length}</span>
+              <span className="text-xs text-muted-foreground">
+                {rest
+                  .slice(0, 8)
+                  .map((n) => [n.id, n.name].filter(Boolean).join(" "))
+                  .join(", ")}
+                {rest.length > 8 ? ", …" : ""}
+              </span>
+            </div>
+          )}
+        </EdgeBox>
+      )}
+      {l.used_by && l.used_by.length > 0 && (
+        <EdgeBox title={`Used by · ${l.used_by.length}`} edge="USED_LESSON">
+          {l.used_by.slice(0, 5).map((u) => (
+            <button
+              key={u.request}
+              type="button"
+              className={cn(row, "hover:bg-muted/50")}
+              disabled={!u.family}
+              onClick={() => u.family && onOpen(u.family)}
+            >
+              <span className="num w-12 shrink-0 text-[11px] font-semibold">{u.request}</span>
+              <span className="text-xs text-muted-foreground">
+                {u.by || "An agent"} used it for {u.name || u.family || "a household"}
+                {u.priority != null ? ` · priority ${u.priority}` : ""}
+              </span>
+            </button>
+          ))}
+        </EdgeBox>
+      )}
+    </div>
+  );
+}
+
+function LessonCard({
+  l,
+  onOpen,
+  onOverride,
+}: {
+  l: Lesson;
+  onOpen: OpenFamily;
+  onOverride: (key: string, o: Override) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const pct = Math.round(l.confidence * 100);
@@ -463,7 +621,7 @@ function LessonCard({ l, onOverride }: { l: Lesson; onOverride: (key: string, o:
           </span>
         </span>
         <span className="flex items-center gap-1">
-          {l.evidence.length > 0 && (
+          {(l.evidence.length > 0 || l.used > 0) && (
             <Button variant="link" size="xs" className="h-auto px-1" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
               {open ? "Hide evidence" : "View evidence"}
             </Button>
@@ -486,19 +644,7 @@ function LessonCard({ l, onOverride }: { l: Lesson; onOverride: (key: string, o:
           )}
         </span>
       </div>
-      {open && (
-        <div className="overflow-hidden rounded-lg border bg-background">
-          <div className="num flex justify-between bg-muted px-3 py-1.5 text-[10px] font-semibold">
-            <span>Evidence · {l.evidence.length}</span>
-            <span className="text-primary">DERIVED_FROM</span>
-          </div>
-          {l.evidence.slice(0, 12).map((ev) => (
-            <div key={ev} className="num border-t px-3 py-1.5 text-[11px]">
-              {ev}
-            </div>
-          ))}
-        </div>
-      )}
+      {open && <LessonGraph l={l} onOpen={onOpen} />}
       {l.by && l.by !== "rules" && <span className="num text-[10px] text-muted-foreground">Proposed by {l.by}</span>}
     </div>
   );
@@ -506,10 +652,12 @@ function LessonCard({ l, onOverride }: { l: Lesson; onOverride: (key: string, o:
 
 export function LessonsPanel({
   lessons,
+  onOpen,
   onLearn,
   onOverride,
 }: {
   lessons: Lesson[];
+  onOpen: OpenFamily;
   onLearn: () => Promise<void>;
   onOverride: (key: string, o: Override) => Promise<void>;
 }) {
@@ -544,7 +692,8 @@ export function LessonsPanel({
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
           The Learner reads field reports and writes rules into the graph. A rule changes new decisions at 50% confidence or
-          more. A coordinator can apply a rule sooner or dismiss it.{last ? ` Last change ${clock(last)}.` : ""}
+          more. A coordinator can apply a rule sooner or dismiss it. Each lesson links to the field evidence it came from, and
+          to every decision that used it.{last ? ` Last change ${clock(last)}.` : ""}
         </p>
       </div>
       {lessons.length === 0 ? (
@@ -560,7 +709,7 @@ export function LessonsPanel({
                   {title} · {list.length}
                 </Eyebrow>
                 {list.map((l) => (
-                  <LessonCard key={l.key} l={l} onOverride={onOverride} />
+                  <LessonCard key={l.key} l={l} onOpen={onOpen} onOverride={onOverride} />
                 ))}
               </section>
             ) : null,

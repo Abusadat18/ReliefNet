@@ -1,6 +1,7 @@
 """Agent 6 - Shift Coordinator: handover briefings and "why" answers."""
 from __future__ import annotations
 
+import ast
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -111,6 +112,32 @@ async def find_family(org: str, question: str) -> Family | None:
     return await memory.family_by(org, family_id=best[2]) if best else None
 
 
+def evidence_text(ev) -> str:
+    """Short text for the evidence on a DUPLICATE_OF edge. Older edges keep it as the text of a dict."""
+    if isinstance(ev, str):
+        try:
+            ev = ast.literal_eval(ev)
+        except (ValueError, SyntaxError):
+            return ev
+    if not isinstance(ev, dict):
+        return str(ev or "")
+    parts = []
+    if ev.get("similarity") is not None:
+        parts.append(f"similarity {ev['similarity']}")
+    if ev.get("distance_m") is not None:
+        parts.append(f"{ev['distance_m']} m")
+    if ev.get("same_landmark"):
+        parts.append("same landmark")
+    elif ev.get("same_ward"):
+        parts.append("same ward")
+    if ev.get("people"):
+        parts.append(f"{ev['people']} people")
+    if ev.get("name") in ("match", "different"):
+        parts.append(f"name {ev['name']}")
+    parts += [f"conflict: {c}" for c in ev.get("conflicts") or []]
+    return " · ".join(parts)
+
+
 async def family_trace(org: str, fid: str) -> dict:
     """Everything the graph remembers about one household, as a timeline and a subgraph."""
     steps: list[dict] = []
@@ -119,6 +146,9 @@ async def family_trace(org: str, fid: str) -> dict:
 
     def node(nid: str, label: str, title: str, **extra):
         nodes.setdefault(nid, {"id": nid, "label": label, "title": title, **extra})
+
+    def edge(src: str, dst: str, kind: str, at=None, reason: str = "", props: str = ""):
+        edges.append({"from": src, "to": dst, "type": kind, "at": at, "reason": reason or "", "props": props or ""})
 
     def step(at, who: str, kind: str, what: str):
         steps.append({"at": at, "who": who, "kind": kind, "what": what})
@@ -130,26 +160,29 @@ async def family_trace(org: str, fid: str) -> dict:
 
     for r in h["requests"]:
         node(r["id"], "Request", r["id"], status=r["status"], priority=r["priority"])
-        edges.append({"from": r["id"], "to": fid, "type": "FOR"})
+        edge(r["id"], fid, "FOR", r["at"], props=f"status:{r['status']}")
         if r["mid"]:
             node(r["mid"], "Message", r["mid"], text=r["text"])
-            edges.append({"from": r["mid"], "to": r["id"], "type": "BECAME"})
+            edge(r["mid"], r["id"], "BECAME", r["at"], f"{r['channel']} message: \"{r['text']}\"")
             step(r["at"], f"{r['channel']} message", "message", f"{r['mid']}: \"{r['text']}\"")
     for p in h["processed"]:
         node(p["agent"], "Agent", p["agent"])
-        edges.append({"from": p["rid"], "to": p["agent"], "type": "PROCESSED_BY"})
+        edge(p["rid"], p["agent"], "PROCESSED_BY", p["at"], p["reason"], f"action:{p['action']}")
         step(p["at"], p["agent"], p["action"], f"{p['rid']} -> {p['to'] or p['action']}: {p['reason']}")
     for d in h["duplicates"]:
-        edges.append({"from": d["rid"], "to": d["cid"], "type": "DUPLICATE_OF"})
+        ev = evidence_text(d["ev"])
+        edge(d["rid"], d["cid"], "DUPLICATE_OF", d["at"], ev or d["reason"], f"score:{d['score']}")
         step(d["at"], "Dedupe", "merge",
-             f"{d['rid']} is the same household as {d['cid']} (score {d['score']}, {d['by']}): {d['ev']}")
+             f"{d['rid']} is the same household as {d['cid']} (score {d['score']}, {d['by']}): {ev}")
     for a in h["assignments"]:
         node(a["team"], "Team", a["team"])
-        edges.append({"from": a["rid"], "to": a["team"], "type": "ASSIGNED_TO"})
+        roads = a["roads"] or []
+        why = f"route over {len(roads)} roads" + ("" if a["active"] else ", ended") if roads else ""
+        edge(a["rid"], a["team"], "ASSIGNED_TO", a["at"], why, f"eta_min:{a['eta']}" if a["eta"] is not None else "")
     for x in h["handoffs"]:
         node(x["src"], "Agent", x["src"])
         node(x["dst"], "Agent", x["dst"])
-        edges.append({"from": x["src"], "to": x["dst"], "type": "HANDED_OFF"})
+        edge(x["src"], x["dst"], "HANDED_OFF", x["at"], x["reason"], f"request:{x['rid']}")
         step(x["at"], x["src"], "handoff", f"handed {x['rid']} to {x['dst']}: {x['reason']}")
     for x in h["reroutes"]:
         if x["road"]:
@@ -160,16 +193,20 @@ async def family_trace(org: str, fid: str) -> dict:
                  f"{x['reason'] or x['team'] + ' off duty'}, so {x['rid']} went back to Dispatch")
     for l in h["lessons"]:
         node(l["key"], "Lesson", l["text"])
-        edges.append({"from": l["rid"], "to": l["key"], "type": "USED_LESSON"})
+        edge(l["rid"], l["key"], "USED_LESSON", l["at"], l["text"], f"by:{l['by']}")
         step(l["at"], l["by"], "lesson", f"used lesson: {l['text']}")
+    for l in h["cited_by"]:
+        node(l["key"], "Lesson", l["text"])
+        edge(l["key"], fid, "DERIVED_FROM", l["at"], l["text"], f"confidence:{l['confidence']}")
     for d in h["deliveries"]:
         node(d["id"], "Delivery", d["id"])
         node(d["team"], "Team", d["team"])
-        edges.append({"from": d["team"], "to": d["id"], "type": "MADE"})
-        edges.append({"from": d["id"], "to": fid, "type": "SERVED"})
+        edge(d["team"], d["id"], "MADE", d["at"])
+        edge(d["id"], fid, "SERVED", d["at"], ", ".join(d["items"] or []))
         step(d["at"], d["team"], "delivery", f"delivered {', '.join(d['items'] or [])}. {d['notes'] or ''}".strip())
 
     steps.sort(key=lambda s: s["at"] or 0)
+    edges.sort(key=lambda e: e["at"] or 0)
     for s in steps:
         s["time"] = _clock(s["at"])
     reqs = h["requests"]

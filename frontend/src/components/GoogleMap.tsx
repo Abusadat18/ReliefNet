@@ -3,6 +3,7 @@ import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { buildLayers, chartColours } from "./deckLayers";
+import { memoryView } from "./memory";
 import type { LayerProps } from "./MapLayers";
 import { cn } from "@/lib/utils";
 
@@ -211,7 +212,7 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey, activeMapId, bounds, night, satellite]);
 
-  const { snapshot, selected, focusRequest, flashes, show, onSelectFamily, onRoadClick } = props;
+  const { snapshot, selected, focusRequest, flashes, show, memory, onSelectFamily, onRoadClick } = props;
   useEffect(() => {
     overlayRef.current?.setProps({
       layers: buildLayers({
@@ -224,6 +225,7 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
         flashes,
         selected,
         focusRequest,
+        memory: memoryView(memory, snapshot),
         zoom,
         show,
         night,
@@ -238,7 +240,7 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
         onRoadClick,
       }),
     });
-  }, [ready, region, bounds, snapshot, selected, focusRequest, flashes, zoom, night, show, onSelectFamily, onRoadClick]);
+  }, [ready, region, bounds, snapshot, selected, focusRequest, flashes, zoom, night, show, memory, onSelectFamily, onRoadClick]);
 
   const zoomBy = (d: number) => {
     const m = mapRef.current;

@@ -529,7 +529,7 @@ async def named_families(org: str) -> dict[str, str]:
 async def household_history(org: str, family_id: str) -> dict[str, list[dict]]:
     """Every recorded step for one household: its requests and messages, the
     agents that processed them, duplicate links, assignments, handoffs,
-    reroutes, lessons used and deliveries."""
+    reroutes, lessons used, lessons that cite it and deliveries."""
     g = org_graph_name(org)
     requests = await query(
         g,
@@ -577,6 +577,12 @@ async def household_history(org: str, family_id: str) -> dict[str, list[dict]]:
         "MATCH (r:Request)-[u:USED_LESSON]->(l:Lesson) WHERE r.id IN $ids"
         " RETURN r.id AS rid, u.at AS at, u.by AS by, l.key AS key, l.text AS text",
         ids, readonly=True,
+    )
+    out["cited_by"] = await query(
+        g,
+        "MATCH (l:Lesson)-[:DERIVED_FROM]->(:Family {id:$id})"
+        " RETURN l.key AS key, l.text AS text, l.created_at AS at, l.confidence AS confidence",
+        {"id": family_id}, readonly=True,
     )
     out["deliveries"] = await query(
         g,

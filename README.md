@@ -234,6 +234,8 @@ Open **Lessons** on the operations screen to see what the Learner found. Triage 
 
 The override is the `override` property of the `Lesson` node. The Learner still updates the confidence, and the Live log shows who changed the lesson.
 
+`GET /api/ops/lessons` also returns `evidence_nodes` (the `DERIVED_FROM` evidence, with label and name) and `used_by` (the requests that used the lesson, newest first).
+
 | Endpoint | Role |
 |---|---|
 | `GET /api/ops/lessons` | Coordinator or admin |
@@ -276,7 +278,14 @@ The **Layers** button on the map shows or hides each ReliefNet layer, and each b
 
 The map keeps the operation area in focus. It dims the world outside the area and draws a line around it. Households that sit close together on the screen become one bubble with a count; click the bubble to zoom in. A household with priority 70 or more shows its score on a pill. Each team shows its name and its number of jobs. The route of the selected household is bold, and the other routes are faint.
 
-Each queue row has a graph receipt, for example `ASSIGNED_TO · Team 2 North`. Click it to read the household's edges and the agents' reasons from FalkorDB. The **Live log** shows the edge that each event wrote. The **Ask why** sheet has a **Graph query** tab with the read-only Cypher behind the answer.
+The dashboard shows where each decision comes from in the graph:
+
+- **Queue:** each row has a graph receipt, for example `ASSIGNED_TO · Team 2 North`. Click it to read the household's edges in time order, each with its recorded reason, for example `(R-111)-[:DUPLICATE_OF {score:1.0}]->(R-101)`.
+- **Live log:** each event shows the edge that it wrote. The header counts the edges in the organisation's graph and the edges with a reason.
+- **Agents:** a working agent shows its lease on the request node, with a bar that counts down. A stopped agent shows the `reclaimed` edge that another copy wrote.
+- **Lessons:** **View evidence** shows the `Lesson` node, its `DERIVED_FROM` evidence and the requests that used it (`USED_LESSON`).
+- **Ask why:** the **Graph query** tab shows the read-only Cypher behind the answer, the counts of each edge type and the read time.
+- **Memory:** turn on **Memory** next to **Layers**, then click a household. The map dims the other layers and draws the household's messages, requests, Triage score, lessons and team around it. A card tells the same path in one sentence.
 
 To add another real flood area, see [docs/AREAS.md](docs/AREAS.md).
 

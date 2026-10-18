@@ -87,6 +87,7 @@ ID prefixes: `M-` message, `R-` request, `F-` family, `O-` observation, `RP-` ro
 | Colours of the Google map layers and the built-in chart | `frontend/src/map.css`. `deckLayers.ts` reads these tokens. |
 | Shared UI pieces (bracket eyebrow, serif heading, score tile, graph receipt) | `frontend/src/components/kit.tsx` |
 | The graph edge behind a live event or a queue row | `frontend/src/components/graph.ts` |
+| The map Memory layer (a household's graph neighbours and its summary) | `frontend/src/components/memory.ts`. `deckLayers.ts` and `MapLayers.tsx` draw it. |
 | An API call from the frontend | `frontend/src/api.ts`, with types in `frontend/src/types.ts` |
 
 Do not put Cypher in an agent file. Put it in `memory.py`, so all agent queries are in one place.

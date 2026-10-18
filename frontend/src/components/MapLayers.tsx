@@ -1,6 +1,7 @@
-import type { FamilyPoint, Region, Road, Snapshot } from "../types";
+import type { FamilyPoint, Region, Road, Snapshot, Trace } from "../types";
 import { clusterFamilies, clusterRing } from "./clusters";
 import type { Visible } from "./LayersMenu";
+import { chipOffsets, memoryView, type MemoryChip, type MemoryView } from "./memory";
 
 export interface Flash {
   id: string;
@@ -19,6 +20,8 @@ export interface LayerProps {
   flashes: Flash[];
   /** Layers this viewer has turned on (the Layers menu). */
   show: Visible;
+  /** The household the Memory layer shows. */
+  memory?: Trace | null;
   onSelectFamily: (id: string) => void;
   onRoadClick: (road: Road, at: { x: number; y: number }) => void;
 }
@@ -58,11 +61,66 @@ function middle(P: Project, coords: [number, number][]): [number, number] {
   return P(...coords[Math.floor((coords.length - 1) / 2)]);
 }
 
+const CHIP: Record<MemoryChip["kind"], { fill: string; ink: string }> = {
+  message: { fill: "var(--popover)", ink: "var(--ink)" },
+  agent: { fill: "var(--popover)", ink: "var(--ink)" },
+  request: { fill: "var(--info-soft)", ink: "var(--info)" },
+  lesson: { fill: "var(--served-soft)", ink: "var(--served)" },
+};
+
+/** The Memory layer of the chart: a veil, then the household with its graph neighbours in a ring. */
+function MemoryRing({ m, P, u }: { m: MemoryView; P: Project; u: number }) {
+  const [hx, hy] = P(m.family.lat, m.family.lon);
+  const offsets = chipOffsets(m.chips.length);
+  const tag = (x: number, y: number, text: string, size: number, fill: string, ink: string, padX: number, h: number, key: string) => {
+    const w = (text.length * size * 0.62 + padX * 2) * u;
+    return (
+      <g key={key}>
+        <rect x={x - w / 2} y={y - (h * u) / 2} width={w} height={h * u} rx={h > 20 ? 6 * u : 4 * u} fill={fill} stroke="var(--border)" strokeWidth={h > 20 ? 1 : 0} vectorEffect="non-scaling-stroke" />
+        <text x={x} y={y + size * 0.36 * u} textAnchor="middle" fontSize={size * u} fill={ink} className="num" fontWeight={h > 20 ? 600 : 700}>
+          {text}
+        </text>
+      </g>
+    );
+  };
+  const team = m.team && P(m.team.lat, m.team.lon);
+  return (
+    <g className="memory" pointerEvents="none" aria-label={`Memory of ${m.family.name || m.family.id}`}>
+      <rect x={-1e7} y={-1e7} width={2e7} height={2e7} fill="var(--paper)" opacity={0.7} />
+      {team && (
+        <>
+          <line x1={hx} y1={hy} x2={team[0]} y2={team[1]} stroke="var(--route)" strokeWidth={2} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+          <circle cx={team[0]} cy={team[1]} r={6 * u} fill="var(--ink)" stroke="var(--paper)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          {tag(team[0], team[1] - 22 * u, `${m.team!.name} · ${m.team!.load} jobs`, 11, "var(--ink)", "var(--paper)", 9, 22, "team")}
+          {tag((hx + team[0]) / 2, (hy + team[1]) / 2, "ASSIGNED_TO", 9, "var(--paper)", "var(--primary)", 5, 16, "team-edge")}
+        </>
+      )}
+      {m.chips.map((ch, i) => (
+        <line
+          key={`l${ch.id}`}
+          x1={hx}
+          y1={hy}
+          x2={hx + offsets[i][0] * u}
+          y2={hy + offsets[i][1] * u}
+          stroke="var(--primary)"
+          strokeOpacity={0.7}
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+      <circle cx={hx} cy={hy} r={9 * u} fill={m.family.status === "ASSIGNED" ? "var(--route)" : m.family.status === "SERVED" ? "var(--paper)" : "var(--waiting)"} stroke="var(--ink)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+      {m.chips.map((ch, i) => tag(hx + offsets[i][0] * u * 0.5, hy + offsets[i][1] * u * 0.5, ch.edge, 9, "var(--paper)", "var(--primary)", 5, 16, `e${ch.id}`))}
+      {m.chips.map((ch, i) => tag(hx + offsets[i][0] * u, hy + offsets[i][1] * u, ch.label, 11, CHIP[ch.kind].fill, CHIP[ch.kind].ink, 9, 26, `n${ch.id}`))}
+    </g>
+  );
+}
+
 const RING = { hazard: "var(--hazard)", waiting: "var(--waiting)", route: "var(--water-ink)" };
 
 /** The operational layers of the built-in chart. deckLayers.ts draws the same on the Google map. */
 export function MapLayers(props: Props) {
   const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, onZoomTo, P, u, showLabels, show } = props;
+  const memory = memoryView(props.memory, snapshot);
   const fams = (snapshot?.families ?? []).filter((f) => show.served || f.status !== "SERVED");
   const selectedReq = fams.find((f) => f.id === selected)?.request ?? null;
   const focus = focusRequest ?? selectedReq;
@@ -260,6 +318,8 @@ export function MapLayers(props: Props) {
         const [x, y] = P(f.lat, f.lon);
         return <circle key={f.id} className="pulse" cx={x} cy={y} r={6 * u} />;
       })}
+
+      {memory && <MemoryRing m={memory} P={P} u={u} />}
     </>
   );
 }

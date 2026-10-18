@@ -11,6 +11,8 @@ export interface Me {
 
 export interface AppConfig {
   auth_mode: "dev" | "clerk";
+  /** How long an agent holds a claimed item, in ms. */
+  lease_ms?: number;
   llm: "live" | "rules";
   models: { fast: string; smart: string } | null;
   embed: string;
@@ -157,6 +159,7 @@ export interface Stats {
   duplicate_dispatches: number;
   dedupe: { precision: number | null; recall: number | null; true_pairs: number; merged_pairs: number };
   lessons_active: number;
+  graph?: { name: string; nodes: number; edges: number; reasons: number };
   llm: string;
 }
 
@@ -192,6 +195,10 @@ export interface Lesson {
   by: string;
   evidence: string[];
   used: number;
+  /** The nodes behind the DERIVED_FROM edges. */
+  evidence_nodes?: { id: string; label: string; name: string }[];
+  /** The requests behind the USED_LESSON edges, newest first. */
+  used_by?: { request: string; by: string; at: number; priority: number | null; family: string | null; name: string | null }[];
   /** A coordinator's decision: "on" applies the lesson, "off" dismisses it, null leaves it to its confidence. */
   override: "on" | "off" | null;
   override_by: string | null;
@@ -218,7 +225,16 @@ export interface Trace {
   requests: { id: string; status: string; priority: number | null; team: string | null; channel: string }[];
   current: { id: string; status: string; priority: number | null; team: string | null } | null;
   timeline: TimelineStep[];
-  graph: { nodes: TraceNode[]; edges: { from: string; to: string; type: string }[] };
+  graph: { nodes: TraceNode[]; edges: TraceEdge[] };
+}
+
+export interface TraceEdge {
+  from: string;
+  to: string;
+  type: string;
+  at?: number | null;
+  reason?: string;
+  props?: string;
 }
 
 export interface Assignment {

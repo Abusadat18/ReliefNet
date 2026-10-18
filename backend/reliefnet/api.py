@@ -69,6 +69,7 @@ async def config():
     reg, drill = areas.region(), areas.drill()
     return {
         "auth_mode": s.auth_mode,
+        "lease_ms": s.lease_ms,
         "llm": "live" if llm.is_live() else "rules",
         "models": {"fast": s.model_fast, "smart": s.model_smart} if llm.is_live() else None,
         "embed": embed_mode(),
@@ -245,6 +246,12 @@ async def stats(user: User = Depends(require("coordinator"))):
         pairs_same_h, pairs_same_f, pairs_both = pairs(ch), pairs(cf), pairs(cb)
     m = await events.metrics(user.org)
     lessons = await db.scalar(g, f"MATCH (l:Lesson) WHERE {memory.LESSON_IN_USE} RETURN count(l)", {"min": 0.5}, default=0)
+    size = (await query(
+        g,
+        "MATCH ()-[e]->() RETURN count(e) AS edges,"
+        " sum(CASE WHEN coalesce(e.reason, '') <> '' THEN 1 ELSE 0 END) AS reasons",
+        readonly=True,
+    ) or [{}])[0]
     return {
         "requests": req,
         "messages": msg,
@@ -263,6 +270,9 @@ async def stats(user: User = Depends(require("coordinator"))):
             "merged_pairs": pairs_same_f,
         },
         "lessons_active": lessons,
+        "graph": {"name": g,
+                  "nodes": await db.scalar(g, "MATCH (n) RETURN count(n)", default=0),
+                  "edges": size.get("edges") or 0, "reasons": size.get("reasons") or 0},
         "llm": "live" if llm.is_live() else "rules",
     }
 
@@ -307,16 +317,26 @@ async def briefings(user: User = Depends(require("coordinator"))):
 
 @app.get("/api/ops/lessons")
 async def lessons(user: User = Depends(require("coordinator"))):
-    return await query(
+    rows = await query(
         org_graph_name(user.org),
-        "MATCH (l:Lesson) OPTIONAL MATCH (l)-[:DERIVED_FROM]->(e) OPTIONAL MATCH (r:Request)-[:USED_LESSON]->(l)"
+        "MATCH (l:Lesson) OPTIONAL MATCH (l)-[:DERIVED_FROM]->(e)"
+        " WITH l, collect(DISTINCT {id: e.id, label: labels(e)[0], name: coalesce(e.name, e.text, e.notes, '')}) AS ev"
+        " OPTIONAL MATCH (r:Request)-[u:USED_LESSON]->(l) OPTIONAL MATCH (r)-[:FOR]->(f:Family)"
+        " WITH l, ev, collect(DISTINCT {request: r.id, by: u.by, at: u.at, priority: r.priority, family: f.id,"
+        " name: f.name}) AS used"
         " RETURN l.key AS key, l.kind AS kind, l.text AS text, l.target AS target, l.need AS need,"
         " l.confidence AS confidence, l.seen AS seen, l.created_at AS created_at, l.updated_at AS updated_at,"
-        " l.by AS by, l.override AS override, l.override_by AS override_by,"
-        " collect(DISTINCT e.id) AS evidence, count(DISTINCT r) AS used"
+        " l.by AS by, l.override AS override, l.override_by AS override_by, ev AS evidence_nodes, used AS used_by"
         " ORDER BY l.confidence DESC",
         readonly=True,
     )
+    # OPTIONAL MATCH with no match still collects one map of nulls.
+    for row in rows:
+        row["evidence_nodes"] = [e for e in row["evidence_nodes"] or [] if e.get("id")]
+        row["used_by"] = sorted((u for u in row["used_by"] or [] if u.get("request")), key=lambda u: -(u["at"] or 0))
+        row["evidence"] = [e["id"] for e in row["evidence_nodes"]]
+        row["used"] = len(row["used_by"])
+    return rows
 
 
 class LessonOverrideIn(BaseModel):

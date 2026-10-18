@@ -1,7 +1,7 @@
 import { ArrowRightIcon, RouteIcon } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { needLabel } from "../hooks";
-import type { Trace, TraceNode } from "../types";
+import type { Trace, TraceEdge, TraceNode } from "../types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -17,6 +17,8 @@ export interface DrawerState {
   answer: { text: string; by: string; question: string } | null;
   loading: boolean;
   tab: SheetTab;
+  /** How long the read of the household took, from the browser. */
+  ms?: number;
 }
 
 const COLS: { label: string; title: string }[] = [
@@ -31,6 +33,15 @@ function colOf(n: TraceNode) {
   if (n.label === "Family") return 1;
   if (n.label === "Delivery") return 3;
   return Math.max(0, COLS.findIndex((c) => c.label === n.label));
+}
+
+/** An edge label with the one number that explains it: the merge score, the ETA or the Triage priority. */
+function edgeLabel(e: TraceEdge) {
+  const value = e.props?.split(":")[1];
+  if (e.type === "DUPLICATE_OF" && value) return `DUPLICATE_OF ${value}`;
+  if (e.type === "ASSIGNED_TO" && value) return `ASSIGNED_TO ${value} min`;
+  const priority = e.type === "PROCESSED_BY" ? /^priority (\d+)/.exec(e.reason ?? "")?.[1] : undefined;
+  return priority ? `PROCESSED_BY · ${priority}` : e.type;
 }
 
 /** The household's memory as columns: what was said, what it became, who handled it, who went, what was learned. */
@@ -83,12 +94,13 @@ export function PathGraph({ trace, labels = false }: { trace: Trace; labels?: bo
           // Between the columns, pulled toward the target row, so labels of edges that leave one node spread out.
           const x = (a.x + b.x) / 2;
           const y = a.y + (b.y - a.y) * 0.8;
-          const w = e.type.length * 4.6 + 8;
+          const text = edgeLabel(e);
+          const w = text.length * 4.6 + 8;
           return (
             <g key={`l${i}`}>
               <rect x={x - w / 2} y={y - 6} width={w} height={12} rx={3} fill="var(--background)" />
               <text x={x} y={y + 3} textAnchor="middle" className="fill-primary font-mono text-[7.5px] font-semibold">
-                {e.type}
+                {text}
               </text>
             </g>
           );
@@ -126,13 +138,18 @@ export function PathGraph({ trace, labels = false }: { trace: Trace; labels?: bo
   );
 }
 
-function QueryTab({ trace }: { trace: Trace }) {
+// FOR and MADE are structure, not decisions, so the chips leave them out.
+const QUIET_EDGES = new Set(["FOR", "MADE"]);
+
+function QueryTab({ trace, ms }: { trace: Trace; ms?: number }) {
   const id = trace.family.id;
   const counts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of trace.graph.edges) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    for (const e of trace.graph.edges) if (!QUIET_EDGES.has(e.type)) m.set(e.type, (m.get(e.type) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [trace]);
+  const messages = trace.graph.nodes.filter((n) => n.label === "Message").length;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const lines: [string, string][] = [
     [`MATCH (r:Request)-[:FOR]->(:Family {id:'${id}'})`, "text-white"],
     ["OPTIONAL MATCH (m:Message)-[:BECAME]->(r)", "text-white"],
@@ -159,12 +176,14 @@ function QueryTab({ trace }: { trace: Trace }) {
           ))}
         </pre>
         <div className="flex flex-wrap gap-1.5">
-          <span className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">{trace.graph.nodes.length} nodes</span>
+          <span className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">{plural(trace.requests.length, "request")}</span>
+          <span className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">{plural(messages, "message")}</span>
           {counts.map(([t, n]) => (
-            <span key={t} className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">
+            <span key={t} className="num rounded-full bg-info-soft px-2 py-0.5 text-[10px] text-info">
               {n} {t}
             </span>
           ))}
+          {ms != null && <span className="num rounded-full bg-success-soft px-2 py-0.5 text-[10px] text-success">{ms} ms</span>}
         </div>
       </section>
       <section className="flex flex-col gap-2">
@@ -318,7 +337,7 @@ export function FamilyDrawer({ state, onTab, onAsk, onClose, onShowRoute }: Prop
           </TabsContent>
 
           <TabsContent value="graph" className="min-h-0 overflow-y-auto px-6 py-5">
-            {trace && <QueryTab trace={trace} />}
+            {trace && <QueryTab trace={trace} ms={state.ms} />}
           </TabsContent>
         </Tabs>
 
@@ -330,7 +349,7 @@ export function FamilyDrawer({ state, onTab, onAsk, onClose, onShowRoute }: Prop
             id="follow"
             value={follow}
             onChange={(e) => setFollow(e.target.value)}
-            placeholder="Ask a follow-up: “Which team is closest if this one is delayed?”"
+            placeholder={tab === "graph" ? "Ask in plain words, or edit the query" : "Ask a follow-up: “Which team is closest if this one is delayed?”"}
             autoComplete="off"
             className="h-9 min-w-0 flex-1 rounded-full border bg-background px-4 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
           />

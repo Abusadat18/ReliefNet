@@ -7,6 +7,7 @@ import pytest
 
 from reliefnet import areas, db, field_ops, memory, routing
 from reliefnet.agents.base import Agent
+from reliefnet.agents.coordinator import family_trace
 from reliefnet.db import org_graph_name, query
 from reliefnet.seed import seed_org, seed_region
 
@@ -102,6 +103,27 @@ async def test_call_number_prefers_the_contact_number(graph):
     )
     numbers = await field_ops.call_numbers(ORG, ["R-901", "R-902", "R-903"])
     assert numbers == {"R-901": "9800000002", "R-902": "9800000003"}
+
+
+
+async def test_family_trace_edges_carry_their_reasons(graph):
+    await query(
+        graph,
+        "CREATE (f:Family {id:'F-901', name:'Pytest', status:'UNSERVED'}),"
+        " (m:Message {id:'M-901', text:'help'})-[:BECAME]->(r:Request {id:'R-901', status:'TRIAGED', created_at:1,"
+        " channel:'web'})-[:FOR]->(f), (r)-[:PROCESSED_BY {at:3, action:'triage', reason:'priority 54'}]->"
+        "(:Agent {name:'Triage-1'}), (d:Request {id:'R-902', status:'MERGED', created_at:2})-[:FOR]->(f),"
+        " (d)-[:DUPLICATE_OF {at:2, score:0.9, evidence:\"{'distance_m': 38}\", reason:'', decided_by:'rules'}]->(r),"
+        " (:Lesson {key:'area_risk:ward 9:', text:'Ward 9 is a hotspot', created_at:4, confidence:0.6})-[:DERIVED_FROM]->(f)",
+    )
+    edges = (await family_trace(ORG, "F-901"))["graph"]["edges"]
+    by_type = {e["type"]: e for e in edges}
+    assert by_type["PROCESSED_BY"]["reason"] == "priority 54"
+    assert by_type["PROCESSED_BY"]["props"] == "action:triage"
+    assert by_type["DUPLICATE_OF"]["reason"] == "38 m"
+    assert by_type["DUPLICATE_OF"]["props"] == "score:0.9"
+    assert by_type["DERIVED_FROM"]["from"] == "area_risk:ward 9:"
+    assert [e["at"] for e in edges] == sorted(e["at"] or 0 for e in edges)
 
 
 async def test_lesson_penalty_steers_route():

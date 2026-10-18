@@ -5,6 +5,7 @@ import type { FamilyPoint, Landmark, Region, Road, RouteLine, Shelter, TeamPoint
 import { clusterFamilies, clusterRing, type Cluster } from "./clusters";
 import type { Visible } from "./LayersMenu";
 import type { Flash } from "./MapLayers";
+import { chipOffsets, type MemoryChip, type MemoryView } from "./memory";
 
 type RGBA = [number, number, number, number];
 type LonLat = [number, number];
@@ -28,6 +29,10 @@ export function chartColours() {
     servedSoft: rgb("--served-soft"),
     waiting: rgb("--waiting"),
     waterInk: rgb("--water-ink"),
+    primary: rgb("--primary"),
+    info: rgb("--info"),
+    infoSoft: rgb("--info-soft"),
+    popover: rgb("--popover"),
     hex: (name: string) => cs.getPropertyValue(name).trim(),
   };
 }
@@ -50,6 +55,7 @@ export interface DeckInput {
   flashes: Flash[];
   selected: string | null;
   focusRequest: string | null;
+  memory: MemoryView | null;
   zoom: number;
   show: Visible;
   colours: Colours;
@@ -172,7 +178,7 @@ export function buildLayers(d: DeckInput): Layer[] {
     },
   ];
 
-  return [
+  const base: Layer[] = [
     new SolidPolygonLayer<{ polygon: Position[][] }>({
       id: "outside-mask",
       data: mask,
@@ -447,6 +453,139 @@ export function buildLayers(d: DeckInput): Layer[] {
       getLineColor: c.hazard,
       getLineWidth: 2,
       lineWidthUnits: "pixels",
+    }),
+  ];
+  return [...base, ...memoryLayers(d, pill)];
+}
+
+type ChipAt = MemoryChip & { at: LonLat; mid: LonLat };
+
+/**
+ * The Memory layer: a veil over the other layers, then the selected household with
+ * its graph neighbours in a ring. The ring keeps its size in pixels at every zoom.
+ */
+function memoryLayers(d: DeckInput, pill: Record<string, unknown>): Layer[] {
+  const m = d.memory;
+  if (!m) return [];
+  const c = d.colours;
+  const ppd = pxPerDeg(d.zoom);
+  const home: LonLat = [m.family.lon, m.family.lat];
+  const cos = Math.cos((m.family.lat * Math.PI) / 180);
+  const shift = ([dx, dy]: [number, number], f = 1): LonLat => [home[0] + (dx * f) / ppd, home[1] - (dy * f * cos) / ppd];
+  const offsets = chipOffsets(m.chips.length);
+  const chips: ChipAt[] = m.chips.map((ch, i) => ({ ...ch, at: shift(offsets[i]), mid: shift(offsets[i], 0.5) }));
+  const team = m.team;
+  const fill = (ch: MemoryChip): RGBA => (ch.kind === "request" ? c.infoSoft : ch.kind === "lesson" ? c.servedSoft : c.popover);
+  const ink = (ch: MemoryChip): RGBA => (ch.kind === "request" ? c.info : ch.kind === "lesson" ? c.served : c.ink);
+  const big = 1e3;
+  return [
+    new SolidPolygonLayer<{ polygon: Position[] }>({
+      id: "memory-veil",
+      data: [{ polygon: [[-big, -85], [big, -85], [big, 85], [-big, 85]] }],
+      getPolygon: (v) => v.polygon,
+      getFillColor: d.night ? [11, 17, 20, 170] : [248, 246, 241, 175],
+      updateTriggers: { getFillColor: d.night },
+    }),
+    new PathLayer<{ path: LonLat[] }, PathStyleExtensionProps<{ path: LonLat[] }>>({
+      id: "memory-team-link",
+      data: team ? [{ path: [home, [team.lon, team.lat]] }] : [],
+      getPath: (l) => l.path,
+      getColor: c.route,
+      getWidth: 2,
+      widthUnits: "pixels",
+      getDashArray: [4, 3],
+      extensions: dashed,
+    }),
+    new PathLayer<ChipAt>({
+      id: "memory-links",
+      data: chips,
+      getPath: (ch) => [home, ch.at],
+      getColor: alpha(c.primary, 170),
+      getWidth: 1.5,
+      widthUnits: "pixels",
+    }),
+    new ScatterplotLayer<TeamPoint>({
+      id: "memory-team",
+      data: team ? [team] : [],
+      getPosition: (t) => [t.lon, t.lat],
+      getRadius: 6,
+      radiusUnits: "pixels",
+      stroked: true,
+      getFillColor: c.ink,
+      getLineColor: c.paper,
+      getLineWidth: 2,
+      lineWidthUnits: "pixels",
+    }),
+    new TextLayer<TeamPoint>({
+      id: "memory-team-pill",
+      data: team ? [team] : [],
+      getPosition: (t) => [t.lon, t.lat],
+      getText: (t) => `${t.name} · ${t.load} job${t.load === 1 ? "" : "s"}`,
+      getPixelOffset: [0, -22],
+      getSize: 11,
+      getColor: c.paper,
+      getBackgroundColor: c.ink,
+      backgroundPadding: [9, 5],
+      ...pill,
+      getBorderWidth: 0,
+    }),
+    new TextLayer<{ at: LonLat }>({
+      id: "memory-team-edge",
+      data: team ? [{ at: [(home[0] + team.lon) / 2, (home[1] + team.lat) / 2] }] : [],
+      getPosition: (l) => l.at,
+      getText: () => "ASSIGNED_TO",
+      getSize: 9,
+      getColor: c.primary,
+      getBackgroundColor: c.paper,
+      backgroundPadding: [5, 2],
+      ...pill,
+      backgroundBorderRadius: 4,
+      getBorderWidth: 0,
+      fontFamily: MONO,
+      fontWeight: 700,
+    }),
+    new ScatterplotLayer<FamilyPoint>({
+      id: "memory-household",
+      data: [m.family],
+      getPosition: (f) => [f.lon, f.lat],
+      getRadius: 9,
+      radiusUnits: "pixels",
+      stroked: true,
+      getFillColor: m.family.status === "SERVED" ? c.paper : m.family.status === "ASSIGNED" ? c.route : c.waiting,
+      getLineColor: c.ink,
+      getLineWidth: 3,
+      lineWidthUnits: "pixels",
+    }),
+    new TextLayer<ChipAt>({
+      id: "memory-edges",
+      data: chips,
+      getPosition: (ch) => ch.mid,
+      getText: (ch) => ch.edge,
+      getSize: 9,
+      getColor: c.primary,
+      getBackgroundColor: c.paper,
+      backgroundPadding: [5, 2],
+      ...pill,
+      backgroundBorderRadius: 4,
+      getBorderWidth: 0,
+      fontFamily: MONO,
+      fontWeight: 700,
+    }),
+    new TextLayer<ChipAt>({
+      id: "memory-nodes",
+      data: chips,
+      getPosition: (ch) => ch.at,
+      getText: (ch) => ch.label,
+      getSize: 11,
+      getColor: ink,
+      getBackgroundColor: fill,
+      backgroundPadding: [9, 6],
+      ...pill,
+      backgroundBorderRadius: 6,
+      getBorderColor: alpha(c.ink3, 120),
+      getBorderWidth: 1,
+      fontFamily: MONO,
+      fontWeight: 600,
     }),
   ];
 }

@@ -1,6 +1,7 @@
 """Pure-logic tests: no database needed."""
 import pytest
 
+from reliefnet.agents.coordinator import evidence_text
 from reliefnet.agents.dedupe import score_pair
 from reliefnet.agents.triage import cluster_bonus, score
 from reliefnet.domain import NEED_SUPPLIES, SUPPLIES, coverage
@@ -129,3 +130,13 @@ def test_team_base_must_be_inside_the_area():
 def test_seeded_team_supplies_are_known():
     for teams in areas.module().TEAM_BASES.values():
         assert all(set(t.supplies) <= set(SUPPLIES) for t in teams)
+
+
+def test_duplicate_evidence_reads_as_text():
+    ev = {"similarity": 0.903, "distance_m": 38, "same_ward": True, "same_landmark": True, "people": "7 vs 7",
+          "name": "unknown", "conflicts": []}
+    want = "similarity 0.903 · 38 m · same landmark · 7 vs 7 people"
+    assert evidence_text(ev) == want
+    assert evidence_text(str(ev)) == want  # older edges keep the dict as text
+    assert evidence_text("not a dict") == "not a dict"
+    assert evidence_text(None) == ""

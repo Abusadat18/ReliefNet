@@ -7,6 +7,7 @@ import {
   PlayIcon,
   SparklesIcon,
   UsersIcon,
+  WaypointsIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -28,6 +29,7 @@ import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialog
 import { FamilyDrawer, type DrawerState, type SheetTab } from "../components/FamilyDrawer";
 import { BrandMark, Eyebrow, SerifTitle } from "../components/kit";
 import { LayersMenu, useMapLayers } from "../components/LayersMenu";
+import { memorySummary } from "../components/memory";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
 import { PlacesDialog } from "../components/PlacesDialog";
 import { TeamsDialog } from "../components/TeamsDialog";
@@ -172,6 +174,9 @@ export function Ops() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [mapFailed, setMapFailed] = useState<string | null>(null);
   const [layers, setLayer] = useMapLayers();
+  // With the Memory layer on, a click on a household draws its graph on the map instead of opening the sheet.
+  const [memoryOn, setMemoryOn] = useState(false);
+  const [memory, setMemory] = useState<{ id: string; trace: Trace | null; error?: string } | null>(null);
 
   useEffect(() => {
     api.get<LiveEvent[]>("/api/ops/events?count=200").then(setEvents).catch(() => undefined);
@@ -222,12 +227,32 @@ export function Ops() {
     setSelected(id);
     setDrawer({ trace: null, answer: null, loading: true, tab });
     try {
+      const t0 = performance.now();
       const trace = await api.get<Trace>(`/api/ops/family/${encodeURIComponent(id)}`);
-      setDrawer({ trace, answer: null, loading: false, tab });
+      setDrawer({ trace, answer: null, loading: false, tab, ms: Math.round(performance.now() - t0) });
     } catch (e) {
       setDrawer({ trace: null, answer: { text: e instanceof Error ? e.message : String(e), by: "rules", question: id }, loading: false, tab });
     }
   }, []);
+
+  const showMemory = useCallback(async (id: string) => {
+    setSelected(id);
+    setMemory({ id, trace: null });
+    try {
+      const trace = await api.get<Trace>(`/api/ops/family/${encodeURIComponent(id)}`);
+      setMemory((m) => (m?.id === id ? { id, trace } : m));
+    } catch (e) {
+      setMemory((m) => (m?.id === id ? { id, trace: null, error: e instanceof Error ? e.message : String(e) } : m));
+    }
+  }, []);
+
+  const toggleMemory = () => {
+    if (memoryOn) {
+      setMemory(null);
+      setSelected(null);
+    } else if (selected) void showMemory(selected);
+    setMemoryOn(!memoryOn);
+  };
 
   const askWhy = useCallback(async (q: string) => {
     setDrawer({ trace: null, answer: null, loading: true, tab: "why" });
@@ -269,7 +294,8 @@ export function Ops() {
     focusRequest,
     flashes,
     show: layers,
-    onSelectFamily: openFamily,
+    memory: memoryOn ? memory?.trace : null,
+    onSelectFamily: memoryOn ? showMemory : openFamily,
     onRoadClick: (road: Road, at: { x: number; y: number }) => {
       const box = wrapRef.current!.getBoundingClientRect();
       setRoadMsg(null);
@@ -418,7 +444,18 @@ export function Ops() {
             <Legend />
 
             {mergedRegion && (
-              <div className="absolute top-4 right-16 z-10">
+              <div className="absolute top-4 right-16 z-10 flex items-center gap-2">
+                <Button
+                  variant={memoryOn ? "default" : "outline"}
+                  size="sm"
+                  className={cn("rounded-full shadow-sm", !memoryOn && "bg-background")}
+                  aria-pressed={memoryOn}
+                  onClick={toggleMemory}
+                  title="Show what the graph remembers about a household"
+                >
+                  <WaypointsIcon data-icon="inline-start" />
+                  Memory
+                </Button>
                 <LayersMenu visible={layers} onChange={setLayer} />
               </div>
             )}
@@ -436,6 +473,40 @@ export function Ops() {
                     <p className="text-sm text-muted-foreground">Ask an admin of your organisation to add a team.</p>
                   )}
                 </div>
+              </MapCard>
+            )}
+
+            {memoryOn && (
+              <MapCard className="right-4 bottom-20 z-10 flex w-[300px] flex-col gap-2 bg-popover/95 p-4" role="status" aria-live="polite">
+                <div className="flex items-start justify-between gap-2">
+                  <Eyebrow className="text-foreground">
+                    {memory?.trace
+                      ? `${memory.trace.family.name || memory.trace.family.id} · ${memory.trace.family.id} · in the graph`
+                      : "Memory layer"}
+                  </Eyebrow>
+                  <button
+                    type="button"
+                    aria-label="Turn off the Memory layer"
+                    className="-mt-1 -mr-1 grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-muted"
+                    onClick={toggleMemory}
+                  >
+                    <XIcon className="size-3.5" />
+                  </button>
+                </div>
+                <p className="text-[13px] leading-snug text-muted-foreground">
+                  {memory?.trace
+                    ? memorySummary(memory.trace)
+                    : memory?.error
+                      ? memory.error
+                      : memory
+                        ? "Reading this household's edges…"
+                        : "Click a household to see what the graph remembers about it."}
+                </p>
+                {memory?.trace && (
+                  <Button variant="link" size="xs" className="h-auto self-start p-0" onClick={() => void openFamily(memory.id, "graph")}>
+                    Open the graph query
+                  </Button>
+                )}
               </MapCard>
             )}
 
@@ -535,17 +606,24 @@ export function Ops() {
               ))}
             </TabsList>
             <TabsContent value="queue" className="min-h-0 overflow-y-auto">
-              <QueuePanel items={queue.data?.items ?? []} onOpen={openFamily} />
+              <QueuePanel items={queue.data?.items ?? []} graphName={s?.graph?.name ?? (me ? `org_${me.org}` : "")} onOpen={openFamily} />
             </TabsContent>
             <TabsContent value="feed" className="min-h-0 overflow-y-auto">
-              <FeedPanel events={events} onOpen={openFamily} />
+              <FeedPanel events={events} graph={s?.graph} onOpen={openFamily} />
             </TabsContent>
             <TabsContent value="agents" className="min-h-0 overflow-y-auto">
-              <AgentsPanel agents={agents.data ?? []} queue={queue.data?.items ?? []} onChange={() => void agents.reload()} />
+              <AgentsPanel
+                agents={agents.data ?? []}
+                queue={queue.data?.items ?? []}
+                events={events}
+                leaseMs={config?.lease_ms ?? 8000}
+                onChange={() => void agents.reload()}
+              />
             </TabsContent>
             <TabsContent value="lessons" className="min-h-0 overflow-y-auto">
               <LessonsPanel
                 lessons={lessons.data ?? []}
+                onOpen={openFamily}
                 onLearn={async () => {
                   lessons.setData(await api.post<Lesson[]>("/api/ops/learn"));
                 }}
