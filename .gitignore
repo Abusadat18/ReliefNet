@@ -9,4 +9,6 @@ backend/uploads/
 node_modules/
 frontend/dist/
 .claude/worktrees/
+# Local links to .agents/skills, made by `npx skills add`.
+.claude/skills/
 *.tsbuildinfo
