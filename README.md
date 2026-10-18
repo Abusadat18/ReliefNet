@@ -17,6 +17,7 @@ Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coord
 | Graph data model | [Graph data model](#graph-data-model) |
 | Cypher and graph algorithms | [Key Cypher queries](#key-cypher-queries) |
 | AI tools | See [AI tools used](#ai-tools-used) |
+| Summary for language models | [llms.txt](llms.txt), also served by the web app at `/llms.txt` |
 
 FalkorDB is the only memory and the only way the agents share state. No agent calls another agent. Each agent claims work in the graph, does one job and writes the result back with its reason.
 

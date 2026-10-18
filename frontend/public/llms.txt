@@ -1,0 +1,56 @@
+# ReliefNet
+
+> ReliefNet is a team of AI agents that coordinate flood relief through one shared memory graph in FalkorDB. Help requests arrive as messy, repeated messages (Telegram, a web help form, coordinators). The agents read, merge, prioritise, dispatch and remember each request in the graph. The agents never call each other: FalkorDB is the only memory and the only channel between them. Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: Agent Memory and Coordination.
+
+The default area is Rajendra Nagar and Kankarbagh in Patna, India (flooded in September 2019), with real roads from OpenStreetMap. Stack: Python 3.12, FastAPI, FalkorDB, LangChain and LangGraph (model calls only, no LangChain memory); React 19, TypeScript, Vite, deck.gl. Every model path has an offline rule-based path, so the system runs with no model key.
+
+## How the agents share memory
+
+- Each agent watches one request status, claims one request with a lease (`claimed_by`, `lease_until` on the node), does one job, and moves the request to the next status in the same guarded Cypher write. That status change is the handoff.
+- A write succeeds only while the agent holds the lease. If an agent crashes, its lease expires and another copy reclaims the request; the graph records the reclaim.
+- Every pipeline step adds a `PROCESSED_BY` edge with the agent's reason. "Ask why" answers are read from these edges.
+- Pipeline: Intake (Message → NEW), Dedupe (NEW → RESOLVED or MERGED), Triage (RESOLVED → TRIAGED), Dispatch (TRIAGED → ASSIGNED), Field (ASSIGNED → DELIVERED). Periodic: Shift Coordinator (handover briefings, "why" answers) and Learner (Lesson nodes from field evidence).
+- Each organisation has its own graph (`org_<slug>`) in one FalkorDB instance; the organisation comes from the verified sign-in, never from the request body. Roads, landmarks, neighbourhoods, wards and shelters live in one shared `region` graph.
+
+## Track 02 focus points
+
+- Episodic memory: `Message`, `Delivery`, `Observation`, `Report` nodes and `BECAME`, `PROCESSED_BY`, `DUPLICATE_OF`, `HANDED_OFF`, `REROUTED`, `SERVED` edges, each with a time and a reason.
+- Semantic memory: `Family`, `Need`, `Team`, and the region graph (`Junction`-`ROAD`-`Junction`, `Landmark`, `Neighbourhood`, `Ward`, `Shelter`).
+- Procedural memory: `Lesson` nodes with `DERIVED_FROM` evidence edges; `USED_LESSON` edges mark each decision a lesson changed. Confidence updates as evidence arrives; coordinators can apply or dismiss a lesson.
+- Memory across sessions: the graph persists (append-only file); shift briefings and "Ask why" read the full history; field chat history is stored in FalkorDB.
+- Shared state and handoffs: request status plus leases, `ASSIGNED_TO` and `HANDED_OFF` edges.
+- High-concurrency reads and writes: a claim is one atomic Cypher write; a test runs 30 parallel claims and checks that no request is taken twice.
+- Separate memory per tenant: one graph per organisation.
+- The path behind an answer: queue receipts, the "Graph query" tab with the Cypher behind an answer, lesson evidence, and a map "Memory" layer that draws a household's graph neighbours.
+
+## Graph algorithms and indexes used
+
+- `algo.SPpaths` (shortest paths, weighted by `cost`) routes teams on the OpenStreetMap road graph; a flooded road gets a high cost, so routes avoid it.
+- `db.idx.vector.queryNodes` on `Request.embedding` finds similar earlier requests for duplicate detection, together with distance, landmark and household-size evidence.
+
+## Docs
+
+- [README](https://github.com/Abusadat18/ReliefNet/blob/main/README.md): quick start, the demo, how it works, the graph data model and the key Cypher queries
+- [AGENTS.md](https://github.com/Abusadat18/ReliefNet/blob/main/AGENTS.md): architecture rules, request statuses, where code goes, traps
+- [Areas](https://github.com/Abusadat18/ReliefNet/blob/main/docs/AREAS.md): how an area is built from OpenStreetMap, landmarks, neighbourhoods and location clues
+- [Google Maps](https://github.com/Abusadat18/ReliefNet/blob/main/docs/GOOGLE_MAPS.md): the base map and the label style
+- [Clerk](https://github.com/Abusadat18/ReliefNet/blob/main/docs/CLERK.md): sign-in and organisations
+- [Telegram](https://github.com/Abusadat18/ReliefNet/blob/main/docs/TELEGRAM.md): the Telegram bot
+
+## Code to check each claim
+
+- [backend/reliefnet/memory.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/memory.py): every agent query (claim with lease, guarded finish, vector search, duplicate merge, lessons, household history)
+- [backend/reliefnet/agents/base.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/agents/base.py): the claim–work–finish loop and the lease reclaim
+- [backend/reliefnet/agents/](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/agents/): intake, dedupe, triage, dispatch, field, coordinator, learner
+- [backend/reliefnet/routing.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/routing.py): road state and `algo.SPpaths` routing
+- [backend/reliefnet/geo.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/geo.py): location from landmark, road, neighbourhood and ward clues
+- [backend/reliefnet/auth.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/auth.py) and [backend/reliefnet/db.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/reliefnet/db.py): verified organisation and per-tenant graph names
+- [backend/tests/test_graph.py](https://github.com/Abusadat18/ReliefNet/blob/main/backend/tests/test_graph.py): parallel claims, lease reclaim, flooded-road routing, lesson overrides, trace edges with reasons
+
+## Optional
+
+- [frontend/src/pages/Ops.tsx](https://github.com/Abusadat18/ReliefNet/blob/main/frontend/src/pages/Ops.tsx): the coordinator dashboard
+- [frontend/src/components/memory.ts](https://github.com/Abusadat18/ReliefNet/blob/main/frontend/src/components/memory.ts): the map Memory layer
+- [docker-compose.yml](https://github.com/Abusadat18/ReliefNet/blob/main/docker-compose.yml): FalkorDB, API, workers, web and the optional Telegram bot
+
+AI coding assistants were used during the event and are disclosed in the README ("AI tools used").
