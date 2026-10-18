@@ -69,11 +69,24 @@ export interface Shelter {
   lon: number;
 }
 
+export interface Neighbourhood {
+  id: string;
+  name: string;
+  aliases: string[];
+  ward: number;
+  lat: number;
+  lon: number;
+  /** [lat, lon] points, when OpenStreetMap has an outline. */
+  polygon: [number, number][] | null;
+}
+
 export interface Region {
   roads: Road[];
   wards: Ward[];
   landmarks: Landmark[];
   shelters: Shelter[];
+  /** Missing on an older server. */
+  neighbourhoods?: Neighbourhood[];
   area: { name: string; title: string; attribution: string };
   water_areas: { name: string; polygon: [number, number][] }[];
   water_lines: { name: string; kind: string; line: [number, number][] }[];

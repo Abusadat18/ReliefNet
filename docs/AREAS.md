@@ -14,8 +14,10 @@ Each area is one Python module in `backend/reliefnet/areas/`:
 | Part | Where | Made by |
 |---|---|---|
 | Roads, bridges, underpasses, drains, railway | `<area>.json` | `import_osm.py`, from OpenStreetMap |
-| Named places: temples, mosques, hospitals, schools, markets, stations, parks, banks | `<area>_places.json` | `import_osm.py --places`, from OpenStreetMap |
+| Named places: temples, mosques, hospitals, schools, markets, stations, parks, banks | `<area>_places.json` (`places`) | `import_osm.py --places`, from OpenStreetMap |
+| Neighbourhoods: suburbs, quarters and neighbourhoods, with an outline or only a centre | `<area>_places.json` (`neighbourhoods`) | `import_osm.py --places`, from OpenStreetMap |
 | Landmarks and the local names people use | `LANDMARKS` in `<area>.py` | By hand. These win over an OpenStreetMap place at the same spot. |
+| More neighbourhoods (optional) | `NEIGHBOURHOODS` in `<area>.py`: `(name, aliases, lat, lon)`, with an optional outline as a fifth item | By hand. These win over an OpenStreetMap neighbourhood with the same name. |
 | More local names and landmarks | Redis, per area | Coordinators, in the dashboard (**Places**) |
 | Wards (simple zones) | `LAT_EDGES`, `LON_EDGES`, `WARD_NAMES` | By hand |
 | Shelters, team bases of the demo organisations | `SHELTERS`, `TEAM_BASES` | By hand |
@@ -32,9 +34,34 @@ The importer keeps every street that connects to others, because the side lanes 
 
 Road status is set per road name. A report "Malahi Pakdi Road flooded" closes every piece of that road.
 
-The places import (`--places`) does not touch the roads. A new places file changes only the landmarks. The next start replaces the landmarks and keeps the roads, their flood state and every organisation's graph.
+The places import (`--places`) does not touch the roads. A new places file changes only the landmarks and the neighbourhoods. The next start replaces them and keeps the roads, their flood state and every organisation's graph.
 
 ReliefNet drops a place that is outside every ward, has the name of a ward, or is the same place as a hand-written landmark. When two places have the same name, ReliefNet adds the ward name, for example "State Bank of India, Kankarbagh".
+
+ReliefNet also drops a neighbourhood that is outside every ward, has a name of only generic words ("Colony"), or has an outline smaller than 20,000 m². A small outline is usually a building or a test edit. When two neighbourhoods have the same name, ReliefNet adds the ward name, for example "RBI staff quarter, Lohanipur".
+
+### Location clues in a help request
+
+Intake reads four location clues from a help request. It matches each clue against the names in the region graph, with no model:
+
+- **Landmark:** a landmark name or local name. The landmark gives the point.
+- **Neighbourhood:** a neighbourhood name or local name. It narrows the area.
+- **Road:** a real road name, for example "Road No.6" or "rd no 6". A name that the importer made ("Lane near Kali Mandir") is not a clue. A name of only road words ("Main Road") is not a clue.
+- **Ward:** a ward number. It narrows the area.
+
+`geo.locate` scores the clues together:
+
+| Clues | Point | `geo_confidence` |
+|---|---|---|
+| Landmark, and every other clue agrees | The landmark. A road within 300 m moves the point onto the road (700 m for a landmark of the kind `locality`). | `high` |
+| Landmark, and a neighbourhood, a road or the ward does not agree | The landmark | `medium` |
+| Road and a neighbourhood or a ward that agree | The point on the road nearest to the centre of the neighbourhood or the ward | `medium` |
+| Road only, or a road that does not agree | A point on the road | `low` |
+| Neighbourhood only, or a neighbourhood and a ward | The middle of the neighbourhood, inside the ward when they overlap | `low` |
+| Ward only | The middle of the ward | `low` |
+| No clue | The middle of the area | `none` |
+
+A neighbourhood with only a centre reaches 1,200 m from it. When two roads share a name, the other clues select one. The Request keeps the matched `neighbourhood` and `road`. The Intake `PROCESSED_BY` reason lists the clues that agree and the clues that do not agree, so **Ask why** can explain the location.
 
 ## Add a new area
 
@@ -60,9 +87,11 @@ Use a place that you know, or a famous flood from the news. Local knowledge make
    python -m reliefnet.areas.import_osm chennai --places --cache chennai_places_osm.json
    ```
 
-   This writes `chennai_places.json`. Commit it. Do not commit the cache file.
+   This writes `chennai_places.json` with the named places and the neighbourhoods. Commit it. Do not commit the cache file.
 
-8. Read the list of places that the importer prints. If people use a local name for a place, add the place to `LANDMARKS` with that name. Coordinators can also add local names later in the dashboard (**Places**).
+   Note: an old cache file has no neighbourhoods. Use a new cache file name after an update of the importer.
+
+8. Read the list of places and neighbourhoods that the importer prints. If people use a local name for a place, add the place to `LANDMARKS` with that name. If OpenStreetMap has few neighbourhoods, add the names that people use to `NEIGHBOURHOODS`. Coordinators can also add local names later in the dashboard (**Places**).
 9. If you changed `LANDMARKS`, run the road importer again, so that it names unnamed roads after them.
 
    Caution: a new road import can change the junction IDs. Then the next start rebuilds every organisation's graph.
@@ -79,4 +108,4 @@ Use a place that you know, or a famous flood from the news. Local knowledge make
 
 OpenStreetMap data is © OpenStreetMap contributors, under the Open Database License (ODbL). The dashboard shows this credit in the **Shift status** card on the map. Keep the credit if you publish ReliefNet with OpenStreetMap data.
 
-The named places in `<area>_places.json` also come from OpenStreetMap under the ODbL. The Places dialog shows the credit for them.
+The named places and neighbourhoods in `<area>_places.json` also come from OpenStreetMap under the ODbL. The Places dialog shows the credit for them.

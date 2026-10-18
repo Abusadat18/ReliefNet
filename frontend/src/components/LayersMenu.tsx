@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 
-export type LayerKey = "wards" | "routes" | "served" | "low" | "places";
+export type LayerKey = "names" | "wards" | "routes" | "served" | "low" | "places";
 export type Visible = Record<LayerKey, boolean>;
 
 const LAYERS: { key: LayerKey; label: string; hint: string }[] = [
+  { key: "names", label: "Names", hint: "Neighbourhoods, roads and landmarks: the names that Intake knows" },
   { key: "wards", label: "Ward zones", hint: "The 16 zones that messages call “ward 11”" },
   { key: "routes", label: "Team routes", hint: "The way each team takes. The selected route stays bold." },
   { key: "served", label: "Served households", hint: "Households that got help" },
@@ -16,7 +17,7 @@ const LAYERS: { key: LayerKey; label: string; hint: string }[] = [
 ];
 
 const STORE = "reliefnet.layers";
-const ALL_ON: Visible = { wards: true, routes: true, served: true, low: true, places: true };
+const ALL_ON: Visible = { names: true, wards: true, routes: true, served: true, low: true, places: true };
 
 /** Which map layers this viewer wants to see. Each browser keeps its own choice. */
 export function useMapLayers(): [Visible, (key: LayerKey, on: boolean) => void] {

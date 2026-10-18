@@ -1,5 +1,6 @@
 import type { FamilyPoint, Region, Road, Snapshot, Trace } from "../types";
 import { clusterFamilies, clusterRing } from "./clusters";
+import { mapNames, zoomFor, type MapLabel } from "./labels";
 import type { Visible } from "./LayersMenu";
 import { chipOffsets, memoryView, type MemoryChip, type MemoryView } from "./memory";
 
@@ -30,28 +31,29 @@ interface Props extends LayerProps {
   P: Project;
   /** SVG units (metres) per screen pixel. */
   u: number;
-  showLabels: boolean;
   onZoomTo: (lat: number, lon: number) => void;
 }
 
 const M_PER_DEG_LAT = 111_000;
 
-/**
- * Flooded roads always get a label; bridges only when zoomed in. A label that would
- * overlap one already placed is left out, flooded roads first.
- */
-function roadLabels(roads: Road[], P: Project, u: number, zoomedIn: boolean) {
-  const wanted = roads
-    .filter((r) => r.status === "flooded" || (zoomedIn && r.kind !== "road"))
-    .filter((r, i, all) => all.findIndex((x) => x.name === r.name) === i)
-    .sort((a, b) => Number(b.status === "flooded") - Number(a.status === "flooded"));
-  const placed: { r: Road; x: number; y: number }[] = [];
-  for (const r of wanted) {
-    const [x, y] = middle(P, r.coords);
-    const clear = placed.every((p) => Math.abs(p.x - x) / u > 150 || Math.abs(p.y - y) / u > 18);
-    if (clear) placed.push({ r, x, y });
-  }
-  return placed;
+/** One name from labels.ts, in SVG units. The halo comes from the `.name` class in map.css. */
+function NameLabel({ l, P, u }: { l: MapLabel; P: Project; u: number }) {
+  const [x, y] = P(l.lat, l.lon);
+  const start = l.anchor === "start";
+  return (
+    <text
+      className={`name ${l.kind}${l.strong ? " strong" : ""}`}
+      x={start ? x + l.dx * u : x}
+      y={(start ? y + l.dy * u : y) + l.size * 0.35 * u}
+      textAnchor={start ? "start" : "middle"}
+      fontSize={l.size * u}
+      fontWeight={l.weight}
+      strokeWidth={3 * u}
+      transform={l.angle ? `rotate(${-l.angle} ${x} ${y})` : undefined}
+    >
+      {l.text}
+    </text>
+  );
 }
 
 const line = (P: Project, pts: [number, number][], close = false) =>
@@ -119,7 +121,9 @@ const RING = { hazard: "var(--hazard)", waiting: "var(--waiting)", route: "var(-
 
 /** The operational layers of the built-in chart. deckLayers.ts draws the same on the Google map. */
 export function MapLayers(props: Props) {
-  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, onZoomTo, P, u, showLabels, show } = props;
+  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, onZoomTo, P, u, show } = props;
+  const names = mapNames(region, zoomFor(u, region.wards[0]?.lat ?? 0), show);
+  const labelsOf = (...kinds: MapLabel["kind"][]) => names.labels.filter((l) => kinds.includes(l.kind));
   const memory = memoryView(props.memory, snapshot);
   const fams = (snapshot?.families ?? []).filter((f) => show.served || f.status !== "SERVED");
   const selectedReq = fams.find((f) => f.id === selected)?.request ?? null;
@@ -207,18 +211,8 @@ export function MapLayers(props: Props) {
         );
       })}
 
-      {roadLabels(region.roads, P, u, showLabels).map(({ r, x, y }) => (
-        <text
-          key={`bl${r.id}`}
-          className="road-label"
-          x={x + 9 * u}
-          y={y}
-          fontSize={11.5 * u}
-          strokeWidth={3 * u}
-          fill={r.status === "flooded" ? "var(--hazard)" : "var(--ink)"}
-        >
-          {r.name}
-        </text>
+      {labelsOf("hood", "road").map((l) => (
+        <NameLabel key={l.id} l={l} P={P} u={u} />
       ))}
 
       {routes.map((rt) => (
@@ -245,30 +239,17 @@ export function MapLayers(props: Props) {
                 strokeWidth={1.4}
                 vectorEffect="non-scaling-stroke"
               />
-              {showLabels && (
-                <text x={x + k + 4 * u} y={y + 4 * u} fontSize={10.5 * u}>
-                  {s.name}
-                </text>
-              )}
             </g>
           );
         })}
 
-      {showLabels &&
-        show.places &&
-        region.landmarks.map((l) => {
-          const [x, y] = P(l.lat, l.lon);
-          return (
-            <g key={l.id} className="landmark">
-              <circle cx={x} cy={y} r={2.5 * u} />
-              {l.source !== "osm" && (
-                <text x={x + 5 * u} y={y - 4 * u} fontSize={10.5 * u}>
-                  {l.name}
-                </text>
-              )}
-            </g>
-          );
-        })}
+      {names.dots.map((l) => {
+        const [x, y] = P(l.lat, l.lon);
+        return <circle key={l.id} className="landmark" cx={x} cy={y} r={2.5 * u} />;
+      })}
+      {labelsOf("shelter", "landmark").map((l) => (
+        <NameLabel key={l.id} l={l} P={P} u={u} />
+      ))}
 
       {(snapshot?.pending ?? []).map((p) => {
         const [x, y] = P(p.lat, p.lon);
@@ -313,6 +294,10 @@ export function MapLayers(props: Props) {
           </g>
         );
       })}
+
+      {labelsOf("flood").map((l) => (
+        <NameLabel key={l.id} l={l} P={P} u={u} />
+      ))}
 
       {flashes.map((f) => {
         const [x, y] = P(f.lat, f.lon);

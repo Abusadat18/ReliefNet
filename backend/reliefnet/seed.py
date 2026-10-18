@@ -36,6 +36,7 @@ REGION_INDEXES = [
     "CREATE INDEX FOR (n:Junction) ON (n.id)",
     "CREATE INDEX FOR (n:Landmark) ON (n.name)",
     "CREATE INDEX FOR (n:Landmark) ON (n.id)",
+    "CREATE INDEX FOR (n:Neighbourhood) ON (n.id)",
     "CREATE INDEX FOR ()-[r:ROAD]-() ON (r.name)",
 ]
 
@@ -82,6 +83,7 @@ async def seed_region(reset: bool = False) -> None:
             # New landmarks or aliases only: keep the roads and their flood state.
             if have["landmarks"] != areas.landmark_version():
                 await _safe(REGION_GRAPH, "CREATE INDEX FOR (n:Landmark) ON (n.id)")
+                await _safe(REGION_GRAPH, "CREATE INDEX FOR (n:Neighbourhood) ON (n.id)")
                 await gazetteer.refresh_landmarks(areas.region(), areas.landmark_version())
                 log.info("region landmarks refreshed: %d landmarks", len(areas.region().landmarks))
             return
@@ -117,6 +119,7 @@ async def seed_region(reset: bool = False) -> None:
         {"rows": [{**w, "polygon": json.dumps(w["polygon"])} for w in reg.wards]},
     )
     await gazetteer.create_landmarks(reg.landmarks)
+    await gazetteer.create_neighbourhoods(reg.neighbourhoods)
     await gazetteer.apply_local_names(reg.name)
     await query(
         REGION_GRAPH,

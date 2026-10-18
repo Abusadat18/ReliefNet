@@ -7,11 +7,14 @@ The operations dashboard can show a Google map under its layers. Without a key, 
 | Part | Source |
 |---|---|
 | The map picture, zoom, pan, tilt, rotation and satellite view | Google Maps JavaScript API (vector map) |
-| The map style (colours, labels, places) | A Map Style in Google Cloud, linked to each Map ID |
+| The map style (colours, places, and Google's labels off) | A Map Style in Google Cloud, linked to each Map ID |
 | The road graph that Dispatch routes on | OpenStreetMap, stored in FalkorDB (see [AREAS.md](AREAS.md)) |
+| The names on the map: neighbourhoods, roads, landmarks and shelters | ReliefNet, from OpenStreetMap and the gazetteer, drawn with deck.gl |
 | Households, teams, routes, flooded roads, shelters | ReliefNet, drawn with deck.gl on top of the map, in step with each map frame |
 
 Google's terms do not allow you to copy Google's road data into your own database. Google's routing also cannot avoid a road that you choose, for example a flooded bridge. That is why the road graph comes from OpenStreetMap and FalkorDB.
+
+The clean map shows no Google labels. The dashboard draws its own names from the same data that Intake uses. Thus a name that you see on the map is a name that Intake can match in a message.
 
 ## Set up the key
 
@@ -72,53 +75,31 @@ The API also sends the Map ID through `/api/config`. You do not need to rebuild 
 
 With a Map ID, Google ignores styles that the app sets in code. You set the style in Google Cloud as a Map Style. Then you link the Map Style to the Map ID.
 
-The clean style keeps the places that people use as landmarks in a flood. It hides the places that do not help relief work:
+The clean style turns off all of Google's labels: road names, place names, area names and the icons of places. It keeps the roads, water, parks and buildings. The dashboard then draws its own names on top (see [Names on the map](#names-on-the-map)).
 
-| Keep (landmarks) | Hide |
-|---|---|
-| Hospitals, pharmacies, police and fire stations | Shops and markets |
-| Schools | Restaurants, cafes and bars |
-| Places of worship | Hotels and hostels |
-| Government offices | Cinemas, museums and other entertainment |
-| Transit (stations, airports) | Banks, ATMs, petrol stations and other services |
-
-In the style editor, these places are map features under **Points of interest**. The table below gives the names that Google used when we wrote this guide. Google can change the names in the console. If a name is different, find the nearest match.
-
-| Map feature in the style editor | Contains | Clean style |
-|---|---|---|
-| **Emergency** | Fire, Hospital, Pharmacy, Police | On |
-| **Other** | Bridge, Cemetery, Government, Library, Military, Place of worship, School, Town square | On |
-| **Transit** | Airport | On |
-| **Landmark** | Large landmarks | On |
-| **Recreation** | Parks, sports fields and other open land | On |
-| **Retail** | Grocery, Shopping | Off |
-| **Food and drink** | Bar, Cafe, Restaurant, Winery | Off |
-| **Lodging** | Hotels and hostels | Off |
-| **Entertainment** | Arts, Casino, Cinema, Historic, Museum, Theme park, Tourist attraction | Off |
-| **Service** | ATM, Bank, Car rental, EV charging, Gas station, Parking lot, Post office, Rest stop, Restroom | Off |
-
-Google has no "Medical" or "Education" group. Hospitals are in **Emergency**. Schools are in **Other**.
+The file [`google-map-style-no-labels.json`](google-map-style-no-labels.json) holds this style.
 
 Make the light style:
 
 1. Open **Google Maps Platform > Map Styles**.
 2. Click **Create style**.
-3. On the **Google styles** tab, select **Light**.
-4. Click **Customize**.
-5. Zoom in on Patna until the map shows places.
-6. In **Map features**, click the settings gear icon to open **Map Settings**.
-7. Under the POI density options, select a low density.
-8. In **Map features**, open **Points of interest > Retail**.
-9. Under **Visibility**, click the eye icon. The icon turns blue.
-10. Click the eye icon again until the feature is off.
-11. Do steps 8 to 10 again for **Food and drink**, **Lodging**, **Entertainment** and **Service**.
-12. Make sure that **Emergency**, **Other**, **Transit** and **Landmark** stay on.
-13. Make the colours of roads, parks and water less strong.
-14. Click **Save**.
-15. In the **Save and publish map style** dialog, type a name, for example `reliefnet-clean`.
-16. Click **Save**.
+3. Select **Import JSON**.
+4. Paste the contents of `docs/google-map-style-no-labels.json`.
+5. Click **Save**.
+6. In the **Save and publish map style** dialog, type a name, for example `reliefnet-clean`.
+7. Click **Save**.
+8. Zoom in on Patna. Make sure that the map shows no names and no place icons.
 
-Note: Google calls POI density an experimental setting. You can set it only on a light style. Google applies it to the linked dark style too.
+If you already have a `reliefnet-clean` style, you can change it. Open the style. If the style editor shows **Import JSON**, use it.
+
+If the console has no **Import JSON** option, turn off the labels by hand:
+
+1. Open the style in the style editor.
+2. In **Map features**, select a top-level feature, for example **Points of interest**.
+3. Under **Labels**, set **Visibility** to off.
+4. Do steps 2 and 3 again for each top-level feature: **Political**, **Points of interest**, **Road network**, **Natural** and **Infrastructure**.
+5. Under **Points of interest**, also set the **Icon** visibility to off, if the editor shows it.
+6. Click **Save**.
 
 Make the dark variant, so that the night chart works:
 
@@ -126,7 +107,7 @@ Make the dark variant, so that the night chart works:
 2. Click **Make a copy**.
 3. Under **Style mode options**, select the checkbox for the dark version.
 4. Click **Save**.
-5. Open the dark copy and make sure that the same map features are off.
+5. Open the dark copy and make sure that it also shows no labels.
 
 Link the styles to the clean Map ID:
 
@@ -141,13 +122,15 @@ Link the styles to the clean Map ID:
 
 Google can take some minutes to apply a changed style.
 
+The app cannot turn off Google's labels on a map with a real Map ID. Only the Map Style can do it. Without a Map ID, the dashboard uses Google's test id `DEMO_MAP_ID`. In that case, the dashboard draws a raster map and turns off Google's labels in code. A raster map cannot tilt.
+
 The dashboard sends a colour scheme (light or dark) to the map. The moon button in the top bar (**Night chart**) selects the dark variant. The sun button (**Day chart**) selects the light variant. If the Map ID has no dark style, the map stays light at night.
 
 > **Note:** The night chart is off for now. The dashboard always uses the day theme, and the moon button does not show. To turn it on again, set `NIGHT_MODE` to `true` in `frontend/src/components/ThemeToggle.tsx`.
 
 ## Add a detailed map (optional)
 
-The clean map hides shops, hotels and restaurants. Sometimes a coordinator needs them, for example to find a named shop in a report. A second Map ID gives a detailed map with all of Google's places.
+The clean map shows only the names that ReliefNet knows. Sometimes a coordinator needs Google's names, for example to find a named shop in a report. A second Map ID gives a detailed map with Google's labels and all of Google's places.
 
 1. Open **Google Maps Platform > Map Management**.
 2. Click **Create Map ID**.
@@ -155,7 +138,7 @@ The clean map hides shops, hotels and restaurants. Sometimes a coordinator needs
 4. Under **Map type**, select **JavaScript**.
 5. Under **Rendering type**, select **Vector**.
 6. Click **Save**.
-7. Keep Google's default style, or link a Map Style that shows all places.
+7. Keep Google's default style, or link a Map Style that shows labels and all places.
 8. Copy the Map ID.
 9. Put the Map ID in `.env` in the repository root:
 
@@ -166,7 +149,9 @@ The clean map hides shops, hotels and restaurants. Sometimes a coordinator needs
 10. Restart the API: `docker compose up -d api`, or restart `uvicorn` in local development.
 11. Reload the dashboard.
 
-The dashboard then shows a **Clean / All** switch on the map. **Clean** uses `GOOGLE_MAPS_MAP_ID`. **All** uses `GOOGLE_MAPS_MAP_ID_DETAILED`. Each browser remembers its choice.
+The dashboard then shows a **Clean / All** switch on the map. **Clean** uses `GOOGLE_MAPS_MAP_ID` and shows only ReliefNet's names. **All** uses `GOOGLE_MAPS_MAP_ID_DETAILED` and also shows Google's labels. Each browser remembers its choice.
+
+On **All**, a name can show two times: once from Google and once from ReliefNet. Only the ReliefNet name is sure to match in Intake.
 
 If `GOOGLE_MAPS_MAP_ID_DETAILED` is empty, the dashboard does not show the switch.
 
@@ -176,27 +161,43 @@ The dashboard draws its layers with deck.gl on a canvas above the Google map. Fo
 
 deck.gl needs WebGL in the browser. Without a Google key, the dashboard uses the built-in chart, which does not need WebGL.
 
+## Names on the map
+
+The dashboard draws these names. The built-in chart draws the same names.
+
+| Name | Source | When it shows |
+|---|---|---|
+| Neighbourhood | The area's neighbourhoods from the API (`neighbourhoods` in `/api/ops/region`) | From the area view to a mid zoom. Close in, the landmark names replace it. |
+| Road | The OpenStreetMap road graph | Bridges and long roads first. Short streets show when you zoom in. The text turns with the road. |
+| Flooded road | The road graph, with the flood status | Always, in red, next to the cross |
+| Landmark | The gazetteer: the area list, names that coordinators add, then OpenStreetMap | Area landmarks first, then coordinator names, then OpenStreetMap places |
+| Shelter | The area's shelters | From a mid zoom |
+
+The road importer gives a street with no name a name such as "Lane near Gandhi Maidan 108". The map shows such a name only when you zoom far in.
+
+The names do not overlap. When two names need the same space, the more important name shows. The order is: flooded roads, neighbourhoods, shelters, area landmarks, coordinator landmarks, roads, OpenStreetMap places, then streets with no real name.
+
 ## Hide map layers
 
 Click **Layers** on the map to open the Layers menu. Each item shows or hides one ReliefNet layer. All layers are on by default.
 
+- **Names**: the names of neighbourhoods, roads and landmarks. The red names of flooded roads always show.
 - **Ward zones**: the 16 simple zones that messages refer to, for example "ward 11". They are not the official ward map.
 - **Team routes**: the route that Dispatch gives to each team.
 - **Served households**: the households that already got help.
 - **Low roads near drains**: the thin blue roads that flood first.
-- **Landmarks and shelters**: the named places from the gazetteer, and the relief camps.
+- **Landmarks and shelters**: the named places from the gazetteer, and the relief camps. With this item off, the map also hides the names of landmarks and shelters.
 
 Each browser remembers its choice. Other people do not see your change. The Layers menu works on the Google map and on the built-in chart.
 
 ## Use the map
 
 - Drag to pan. Scroll or use **+** and **−** to zoom. Click the square button below them to show the whole area again.
-- Click **Sat** to see the real ground. Click **Map** to go back.
-- Click **EN** or **हिं** to show Google's map labels in English or Hindi. Google loads the label language with its script, so the page reloads once. Each browser remembers its choice.
+- Click **Sat** to see the real ground. Click **Map** to go back. The satellite view has no Google labels. The ReliefNet names stay on it.
 - The map dims the world outside the operation area and draws a line around the area.
 - Click a household to open it. A bubble with a number holds households that sit close together on the screen. Click it to zoom in. A pill with a number is a household with priority 70 or more.
 - Click any road to mark it flooded or open.
-- The map shows only the roads that carry news: bridges and flyovers, low roads near drains (thin blue), reported roads (dashed) and flooded roads (with a cross). The other streets come from Google's map.
+- The map shows only the roads that carry news: bridges and flyovers, low roads near drains (thin blue), reported roads (dashed) and flooded roads (with a cross). The other streets come from Google's map. Their names come from ReliefNet.
 - The moon button in the top bar also selects the dark variant of the Map Style.
 
 ## Problems
@@ -207,10 +208,11 @@ Each browser remembers its choice. Other people do not see your change. The Laye
 | "The Google Maps script did not load." | The browser cannot reach Google. Check the internet connection. The built-in chart still works. |
 | The built-in chart shows and there is no message. | The API has no key. Check `GOOGLE_MAPS_API_KEY` in `.env`, then restart the API. |
 | The map is grey with "For development purposes only". | Billing is not enabled on the Google Cloud project. |
-| The map has the plain Google style. | No Map Style is linked to the Map ID, or the dashboard uses `DEMO_MAP_ID`. Set `GOOGLE_MAPS_MAP_ID` and link a Map Style to it. Then restart the API and reload. |
+| The map has the plain Google style. | No Map Style is linked to the Map ID. Link the clean Map Style to the Map ID in `GOOGLE_MAPS_MAP_ID`. Then reload. |
+| Google's names show under the ReliefNet names. | The Map Style still shows labels, or Google has not applied the change yet. Import `docs/google-map-style-no-labels.json` into the Map Style again, or turn off the labels by hand. Then wait some minutes. |
+| The map shows no neighbourhood names. | The API is older than the dashboard and sends no `neighbourhoods`. Update and restart the API. |
 | The map has no **Clean / All** switch. | `GOOGLE_MAPS_MAP_ID_DETAILED` is empty. Set it to a second vector Map ID, then restart the API and reload. |
-| **All** looks the same as **Clean**. | The two Map IDs have the same Map Style. Link a style with all places to the detailed Map ID. |
-| Restaurants and shops show at night, but not in the day. | The dark copy of the Map Style still shows those map features. Turn off the same features in the dark copy. |
-| Shops and hotels still show on the clean map. | The Map Style still shows those map features, or Google has not applied the change yet. Check the visibility of each feature, then wait some minutes. |
+| **All** looks the same as **Clean**. | The two Map IDs have the same Map Style. Link a style with labels and all places to the detailed Map ID. |
+| Google's labels show at night, but not in the day. | The dark copy of the Map Style still shows labels. Turn off the labels in the dark copy too. |
 | The map stays light with the night chart. | The Map Style has no dark variant. Add a dark variant to the Map Style. |
 | The map shows, but the layers do not show, or the browser console shows a WebGL error. | The browser or the GPU has WebGL disabled. Enable hardware acceleration in the browser settings. To use the built-in chart, remove `GOOGLE_MAPS_API_KEY` from `.env` and restart the API. |

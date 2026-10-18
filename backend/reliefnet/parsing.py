@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import re
 
+from .areas.places import is_generic, norm as _norm
+
 _NUM_WORDS = {
     "one": 1, "ek": 1, "two": 2, "do": 2, "three": 3, "teen": 3, "four": 4, "char": 4, "chaar": 4,
     "five": 5, "paanch": 5, "panch": 5, "six": 6, "chhe": 6, "seven": 7, "saat": 7, "eight": 8, "aath": 8,
@@ -48,6 +50,52 @@ FLOOD_WORDS = ["flooded", "flood", "doob", "submerged", "pani bhar", "paani bhar
 OPEN_WORDS = ["is open", "khul gaya", "open now", "clear now", "cleared", "chalu"]
 
 
+# Words that only say "this is a road". A road name made only of these ("Main Road") fits many roads.
+ROAD_TYPE_WORDS = {"road", "rd", "marg", "path", "lane", "gali", "street", "main", "flyover", "bridge", "setu",
+                   "overbridge", "ramp", "no", "number", "the", "link", "cross", "new", "old", "of"}
+
+
+def _road_text(text: str) -> str:
+    """Normalised text with one spelling of a numbered road: "Rd No.6" and "road number 6" become "road 6"."""
+    t = re.sub(r"\brd\b", "road", _norm(text))
+    return re.sub(r"\b(road|gali|lane)\s+(?:no|nos|number|num|nr)\s*(?=\d)", r"\1 ", t)
+
+
+def road_forms(name: str) -> set[str]:
+    """The spellings of a road name that a message can contain.
+
+    A generated name ("Lane near Kali Mandir 3") is not a name people type, so it has none.
+    The importer adds the ward to a repeated name ("Road No.1, Lohanipur"); people type only "Road No.1"."""
+    if " near " in f" {name.lower()} ":
+        return set()
+    base = name.split(",")[0]
+    forms = {_norm(base), _road_text(base)}
+    if all(w in ROAD_TYPE_WORDS for w in _road_text(base).split()):
+        return set()
+    return {f for f in forms if len(f) >= 4}
+
+
+def location_clues(raw: str, neighbourhood_names: list[tuple[str, list[str]]] | None = None,
+                   road_names: list[str] | None = None, taken: list[str] = ()) -> dict:
+    """The neighbourhood and the road that a message names, by exact match against our own lists.
+
+    The longest match wins. A road is skipped when its words are only part of a matched landmark
+    name in `taken` ("kali mandir road" is an alias of Kali Mandir). Works with no model."""
+    t = f" {_road_text(raw)} "
+    hood, best = "", 0
+    for name, aliases in neighbourhood_names or []:
+        for alias in {_norm(name), *(_norm(a) for a in aliases)}:
+            if len(alias) >= 3 and f" {alias} " in t and len(alias) > best:
+                best, hood = len(alias), name
+    inside = [f" {_road_text(x)} " for x in taken if x]
+    road, best = "", 0
+    for name in road_names or []:
+        for form in road_forms(name):
+            if f" {form} " in t and len(form) > best and not any(f" {form} " in x for x in inside):
+                best, road = len(form), name.split(",")[0]
+    return {"neighbourhood": hood, "road": road}
+
+
 def _num(tok: str) -> int:
     return int(tok) if tok.isdigit() else _NUM_WORDS.get(tok, 0)
 
@@ -56,7 +104,9 @@ def _has(text: str, words: list[str]) -> bool:
     return any(w in text for w in words)
 
 
-def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None = None) -> dict:
+def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None = None,
+                  neighbourhood_names: list[tuple[str, list[str]]] | None = None,
+                  road_names: list[str] | None = None) -> dict:
     t = " " + re.sub(r"\s+", " ", raw.lower()) + " "
     people = 0
     m = re.search(_NUM + r"\s*(?:\+\s*)?(ppl|people|log|logon|members|member|persons|person|jan|family members|of us)", t)
@@ -86,13 +136,19 @@ def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None =
     if m:
         ward = int(m.group(1))
 
-    landmark = ""
+    landmark, landmark_alias = "", ""
     if landmark_names:
         best = 0
         for name, aliases in landmark_names:
             for alias in [name.lower(), *aliases]:
                 if re.search(rf"\b{re.escape(alias)}\b", t) and len(alias) > best:
-                    best, landmark = len(alias), name
+                    best, landmark, landmark_alias = len(alias), name, alias
+    clues = location_clues(raw, neighbourhood_names, road_names, taken=[landmark_alias])
+    # "Birla Mandir Road" names a road, not the landmark that has the generic alias "mandir".
+    if clues["road"] and landmark_alias and is_generic(landmark_alias) and any(
+            f" {_road_text(landmark_alias)} " in f" {form} " and len(form) > len(landmark_alias)
+            for form in road_forms(clues["road"])):
+        landmark = ""
 
     name = ""
     m = re.search(r"\b([a-z]\.?\s?[a-z]{2,}|[a-z]{3,})\s+(?:family|parivar|pariwar|household)\b", t)
@@ -153,7 +209,9 @@ def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None =
     if needs:
         summary_bits.append("need " + ", ".join(needs))
     loc = landmark or (f"ward {ward}" if ward else "unknown place")
-    summary = (f"{name + ' family: ' if name else ''}" + "; ".join(summary_bits) + f" at {loc}").strip()
+    # geo.resolve matches landmarks against location_text, so a road name stays out of it.
+    where = landmark or clues["road"] or clues["neighbourhood"] or loc
+    summary = (f"{name + ' family: ' if name else ''}" + "; ".join(summary_bits) + f" at {where}").strip()
 
     return {
         "kind": kind,
@@ -170,6 +228,8 @@ def parse_message(raw: str, landmark_names: list[tuple[str, list[str]]] | None =
         "urgency": urgency,
         "ward": ward,
         "landmark": landmark,
+        "neighbourhood": clues["neighbourhood"],
+        "road": clues["road"],
         "location_text": loc,
         "road_name": road_name,
         "road_status": road_status,

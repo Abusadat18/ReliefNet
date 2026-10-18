@@ -183,24 +183,17 @@
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
-.chart .landmark circle {
+.chart .landmark {
   fill: var(--paper);
   stroke: var(--ink-2);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
-}
-.chart .landmark text {
-  fill: var(--ink-2);
 }
 .chart .shelter circle {
   fill: var(--served-soft);
   stroke: var(--served);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
-}
-.chart .shelter text {
-  fill: var(--served);
-  font-weight: 500;
 }
 .chart .team rect {
   fill: var(--ink);
@@ -270,11 +263,21 @@
   vector-effect: non-scaling-stroke;
   animation: pulse 1.6s ease-out 2;
 }
-.chart .road-label {
-  font-weight: 600;
+/* The names from labels.ts. The paper halo keeps them readable over roads and water. */
+.chart .name {
+  fill: var(--ink-2);
   paint-order: stroke;
   stroke: var(--paper);
   stroke-linejoin: round;
+}
+.chart .name.road.strong {
+  fill: var(--ink);
+}
+.chart .name.shelter {
+  fill: var(--served);
+}
+.chart .name.flood {
+  fill: var(--hazard);
 }
 @keyframes pulse {
   from {

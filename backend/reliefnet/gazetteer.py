@@ -1,5 +1,6 @@
-"""The landmarks in the shared region graph, and the local names that coordinators add.
+"""The landmarks and neighbourhoods in the shared region graph, and the local names that coordinators add.
 
+A coordinator can add a local name to a landmark or to a neighbourhood (`add_alias`).
 A region rebuild deletes the region graph, so the graph alone cannot keep a name
 that a coordinator added. Each added landmark and alias is also kept in Redis, in
 the same FalkorDB instance, under the area's name. `apply_local_names()` writes
@@ -20,6 +21,8 @@ REV_KEY = geo.LANDMARKS_REV
 KINDS = ("temple", "mosque", "church", "hospital", "school", "market", "transport", "ground", "office",
          "locality", "junction", "ghat", "landmark")
 MAX_ALIASES = 30
+# Local names work the same way for a landmark and for a neighbourhood.
+PLACE = "MATCH (l) WHERE (l:Landmark OR l:Neighbourhood)"
 
 
 class GazetteerError(ValueError):
@@ -54,6 +57,15 @@ async def create_landmarks(rows: list[dict]) -> None:
         )
 
 
+async def create_neighbourhoods(rows: list[dict]) -> None:
+    await query(
+        REGION_GRAPH,
+        "UNWIND $rows AS n CREATE (:Neighbourhood {id:n.id, name:n.name, aliases:n.aliases, ward:n.ward, lat:n.lat,"
+        " lon:n.lon, polygon:n.polygon, source:n.source})",
+        {"rows": [{**n, "polygon": json.dumps(n["polygon"]) if n["polygon"] else None} for n in rows]},
+    )
+
+
 async def apply_local_names(area: str | None = None) -> int:
     """Write the coordinators' landmarks and aliases into the region graph again. Returns how many."""
     r = db.redis()
@@ -71,18 +83,20 @@ async def apply_local_names(area: str | None = None) -> int:
         aliases = sorted(await r.smembers(_key(f"alias:{lid}", area)))
         params = {"id": lid, "name": name, "aliases": aliases}
         update = " WITH l LIMIT 1 SET l.aliases = l.aliases + [a IN $aliases WHERE NOT a IN l.aliases] RETURN l.id AS id"
-        rows = await query(REGION_GRAPH, "MATCH (l:Landmark {id:$id})" + update, params)
+        rows = await query(REGION_GRAPH, PLACE + " AND l.id = $id" + update, params)
         if not rows:
             # A new OpenStreetMap import can give a place a new id; then its name finds it.
-            rows = await query(REGION_GRAPH, "MATCH (l:Landmark {name:$name})" + update, params)
+            rows = await query(REGION_GRAPH, PLACE + " AND l.name = $name" + update, params)
         n += len(rows) * len(aliases)
     return n
 
 
 async def refresh_landmarks(reg: areas.Region, version: str) -> None:
-    """Replace the landmarks only. The roads, their flood state and the junction ids stay as they are."""
+    """Replace the landmarks and neighbourhoods only. The roads, their flood state and the junction ids stay."""
     await query(REGION_GRAPH, "MATCH (l:Landmark) DELETE l")
+    await query(REGION_GRAPH, "MATCH (n:Neighbourhood) DELETE n")
     await create_landmarks(reg.landmarks)
+    await create_neighbourhoods(reg.neighbourhoods)
     await apply_local_names(reg.name)
     await query(
         REGION_GRAPH,
@@ -95,7 +109,7 @@ async def refresh_landmarks(reg: areas.Region, version: str) -> None:
 async def _find(lid: str) -> dict | None:
     return await db.one(
         REGION_GRAPH,
-        "MATCH (l:Landmark {id:$id}) RETURN l.id AS id, l.name AS name, l.aliases AS aliases, l.ward AS ward,"
+        PLACE + " AND l.id = $id RETURN l.id AS id, l.name AS name, l.aliases AS aliases, l.ward AS ward,"
         " l.kind AS kind, l.lat AS lat, l.lon AS lon, l.source AS source",
         {"id": lid},
         readonly=True,
@@ -104,7 +118,7 @@ async def _find(lid: str) -> dict | None:
 
 async def _owner_of_name(alias: str) -> dict | None:
     return await db.one(
-        REGION_GRAPH, "MATCH (l:Landmark) WHERE toLower(l.name) = $a RETURN l.id AS id, l.name AS name LIMIT 1",
+        REGION_GRAPH, PLACE + " AND toLower(l.name) = $a RETURN l.id AS id, l.name AS name LIMIT 1",
         {"a": alias}, readonly=True,
     )
 
@@ -119,7 +133,7 @@ async def add_alias(lid: str, text: str, by: str) -> dict:
     alias = clean_alias(text)
     lm = await _find(lid)
     if not lm:
-        raise GazetteerError(404, "No landmark has this id.")
+        raise GazetteerError(404, "No landmark or neighbourhood has this id.")
     if alias == lm["name"].lower() or alias in lm["aliases"]:
         raise GazetteerError(409, f"\"{alias}\" is already a name of {lm['name']}.")
     other = await _owner_of_name(alias)
@@ -132,7 +146,7 @@ async def add_alias(lid: str, text: str, by: str) -> dict:
     await r.hset(_key("alias_of"), lid, lm["name"])
     row = await db.one(
         REGION_GRAPH,
-        "MATCH (l:Landmark {id:$id}) SET l.aliases = l.aliases + [a IN [$a] WHERE NOT a IN l.aliases],"
+        PLACE + " AND l.id = $id SET l.aliases = l.aliases + [a IN [$a] WHERE NOT a IN l.aliases],"
         " l.updated_at = $now, l.updated_by = $by RETURN l.aliases AS aliases",
         {"id": lid, "a": alias, "now": now_ms(), "by": by},
     )
@@ -188,7 +202,7 @@ async def forget(lid: str) -> None:
     if added:
         await query(
             REGION_GRAPH,
-            "MATCH (l:Landmark {id:$id}) SET l.aliases = [a IN l.aliases WHERE NOT a IN $added]",
+            PLACE + " AND l.id = $id SET l.aliases = [a IN l.aliases WHERE NOT a IN $added]",
             {"id": lid, "added": sorted(added)},
         )
     await bump()

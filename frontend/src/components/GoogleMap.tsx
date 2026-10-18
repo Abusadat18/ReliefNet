@@ -15,6 +15,16 @@ type Lang = "en" | "hi";
 // Set this to true to bring the switch back.
 const LANG_SWITCH = false;
 
+// Google's test Map ID. Google ignores `styles` on a map with a Map ID, so with this id the map
+// is drawn as a raster map with no Map ID, and these styles turn Google's labels off.
+// A real Map ID gets the same look from docs/google-map-style-no-labels.json in Google Cloud.
+const DEMO_MAP_ID = "DEMO_MAP_ID";
+const NO_GOOGLE_LABELS: google.maps.MapTypeStyle[] = [
+  { elementType: "labels", stylers: [{ visibility: "off" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }] },
+];
+
 function readLang(): Lang {
   if (!LANG_SWITCH) return "en";
   try {
@@ -91,7 +101,7 @@ function Segmented<T extends string>({
 interface Props extends LayerProps {
   apiKey: string;
   mapId: string;
-  /** A second Map ID whose style shows all of Google's places; enables the Clean / Detailed switch. */
+  /** A second Map ID whose style keeps Google's labels and places; enables the Clean / All switch. */
   mapIdDetailed: string | null;
   onFail: (why: string) => void;
 }
@@ -99,7 +109,8 @@ interface Props extends LayerProps {
 /**
  * Google's vector map with our layers drawn by deck.gl in step with every map frame,
  * so households, routes and flood marks stay in place while the map zooms or turns.
- * The map's look comes from the Map Style linked to the Map ID in Google Cloud.
+ * The map's look comes from the Map Style linked to the Map ID in Google Cloud. That style
+ * turns Google's labels off: labels.ts draws our own names instead.
  */
 const DETAIL_STORE = "reliefnet.mapDetail";
 
@@ -161,11 +172,15 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
         const { Map } = (await google.maps.importLibrary("maps")) as google.maps.MapsLibrary;
         if (cancelled || !boxRef.current) return;
         const view = viewRef.current;
+        const look: google.maps.MapOptions =
+          activeMapId === DEMO_MAP_ID
+            ? { styles: NO_GOOGLE_LABELS, renderingType: "RASTER" as google.maps.RenderingType }
+            : { mapId: activeMapId, renderingType: "VECTOR" as google.maps.RenderingType };
         const map = new Map(boxRef.current, {
-          mapId: activeMapId,
+          ...look,
           colorScheme: night ? "DARK" : "LIGHT",
-          renderingType: "VECTOR" as google.maps.RenderingType,
-          mapTypeId: satellite ? "hybrid" : "roadmap",
+          // Plain satellite, not "hybrid": hybrid adds Google's labels, and our names are the only names.
+          mapTypeId: satellite ? "satellite" : "roadmap",
           center: view?.center,
           zoom: view?.zoom,
           disableDefaultUI: true,
@@ -287,8 +302,8 @@ export function GoogleMap({ apiKey, mapId, mapIdDetailed, onFail, ...props }: Pr
             value={detailed ? "detail" : "clean"}
             onChange={(v) => chooseDetail(v === "detail")}
             options={[
-              ["clean", "Clean", "Hide shops, food and hotels"],
-              ["detail", "All", "Show all of Google's places"],
+              ["clean", "Clean", "Only our names: the names that Intake knows"],
+              ["detail", "All", "Also show Google's labels and places"],
             ]}
           />
         )}

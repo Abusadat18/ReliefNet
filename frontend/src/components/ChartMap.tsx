@@ -135,7 +135,6 @@ export function ChartMap(props: LayerProps) {
   const onWheel = (e: WheelEvent) => zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
 
   const path = (pts: [number, number][], close = false) => pathOf(P, pts, close);
-  const showLabels = u < 3.2;
 
   return (
     <>
@@ -176,7 +175,7 @@ export function ChartMap(props: LayerProps) {
             </text>
           );
         })}
-        <MapLayers {...props} P={P} u={u} showLabels={showLabels} onZoomTo={zoomTo} />
+        <MapLayers {...props} P={P} u={u} onZoomTo={zoomTo} />
       </svg>
       <div className="absolute top-4 right-4 z-10 flex w-11 flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
         <button type="button" aria-label="Zoom in" onClick={() => zoomAt(1 / 1.4)} className="grid h-9 place-items-center border-b hover:bg-muted">

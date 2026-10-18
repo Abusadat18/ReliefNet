@@ -132,7 +132,10 @@ async def create_request(org: str, me: Worker, message_id: str, request: Request
             " req.embedding = vecf32($vec)"
             " CREATE (req)-[:PROCESSED_BY {at:$now, action:'intake', from:'', to:'NEW', reason:$why}]->(a)"
         ),
-        params={"req": request.props(), "vec": vector, "why": f"created from {message_id} via {parsed_by}"},
+        params={"req": request.props(), "vec": vector,
+                "why": f"created from {message_id} via {parsed_by}"
+                       + (f"; location from {request.loc_reason} ({request.geo_confidence})"
+                          if request.loc_reason else "")},
     )
 
 

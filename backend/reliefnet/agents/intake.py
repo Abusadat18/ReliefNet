@@ -10,7 +10,7 @@ from .. import areas, embed, events, field_ops, geo, intake_flow, llm, memory
 from ..db import now_ms, redis
 from ..domain import NEEDS, URGENCY
 from ..models import Message, Request
-from ..parsing import parse_message
+from ..parsing import location_clues, parse_message
 from .base import Agent
 
 Need = Literal[tuple(NEEDS)]  # type: ignore[valid-type]
@@ -81,8 +81,16 @@ class IntakeAgent(Agent):
             system = SYSTEM.format(area=areas.region().title, gazetteer=gaz, roads=", ".join(roads))
             out = await llm.json_call(self.s.model_fast, system, f"Message:\n<<<\n{text}\n>>>", IntakeResult)
             if out:
-                return out.model_dump(), llm.name_of(self.s.model_fast)
-        return parse_message(text, await geo.landmark_names()), "rules"
+                data = out.model_dump()
+                return {**data, **await self.clues(text, [data["landmark"]])}, llm.name_of(self.s.model_fast)
+        return parse_message(text, await geo.landmark_names(), await geo.neighbourhood_names(),
+                             await geo.clue_road_names()), "rules"
+
+    async def clues(self, text: str, taken: list[str] = ()) -> dict:
+        """The neighbourhood and road named in the text, matched against the region graph's own names.
+
+        Exact matching, not the model, so the result is the same with and without a model key."""
+        return location_clues(text, await geo.neighbourhood_names(), await geo.clue_road_names(), taken)
 
     async def from_form(self, msg: Message) -> tuple[dict, str]:
         """The bot's guided form: what the person tapped is used as it is.
@@ -93,6 +101,8 @@ class IntakeAgent(Agent):
         if form.get("notes"):
             parsed, _ = await self.extract(form["notes"])
             data = intake_flow.merge_notes(data, parsed)
+        data.update(await self.clues(" ".join(x for x in (form.get("detail"), form.get("notes")) if x),
+                                     [msg.landmark]))
         return data, "form"
 
     async def process(self, org: str, msg: Message) -> None:
@@ -133,6 +143,7 @@ class IntakeAgent(Agent):
         loc = pin or await geo.resolve(
             data.get("landmark", ""), int(data.get("ward") or 0), data.get("location_text", ""),
             seed=name + (data.get("landmark") or "") + str(data.get("ward")) + msg.id,
+            neighbourhood=data.get("neighbourhood") or "", road=data.get("road") or "",
         )
         needs = [n for n in data.get("needs", []) if n in NEEDS] or ["food", "water"]
         # The embedding is built from the structured facts, so two different
@@ -140,7 +151,8 @@ class IntakeAgent(Agent):
         desc = (
             f"{name + ' family. ' if name else ''}{data.get('people', 0)} people, {data.get('elderly', 0)} elderly, "
             f"{data.get('children', 0)} children. Needs {', '.join(needs)}. "
-            f"{loc['landmark'] or data.get('location_text', '')}, ward {loc['ward']}. {data.get('summary_en', '')}"
+            f"{loc['landmark'] or loc.get('road') or loc.get('neighbourhood') or data.get('location_text', '')}, "
+            f"ward {loc['ward']}. {data.get('summary_en', '')}"
         )
         seq = await redis().incr(f"rn:seq:{org}:R")
         return Request(
@@ -159,10 +171,13 @@ class IntakeAgent(Agent):
             urgency=data.get("urgency") or "medium",
             ward=loc["ward"],
             landmark=loc["landmark"],
+            neighbourhood=loc.get("neighbourhood", ""),
+            road=loc.get("road", ""),
             location_text=data.get("location_text") or "",
             lat=loc["lat"],
             lon=loc["lon"],
             geo_confidence=loc["geo_confidence"],
+            loc_reason=loc.get("why") or ("pin moved into the area" if loc.get("snapped") else "shared pin"),
             summary=data.get("summary_en") or desc,
             desc=desc,
             parsed_by=how,

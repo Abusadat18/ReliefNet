@@ -63,10 +63,13 @@ class Request(Node):
     urgency: str = "medium"
     ward: int = 0
     landmark: str = ""
+    neighbourhood: str = ""
+    road: str = ""  # the named road the household is on; not a road report
     location_text: str = ""
     lat: float = 0.0
     lon: float = 0.0
     geo_confidence: str = "none"
+    loc_reason: str = ""  # which location clues agreed, for "Ask why"
     summary: str = ""
     desc: str = ""
     parsed_by: str = ""

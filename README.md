@@ -243,19 +243,26 @@ The override is the `override` property of the `Lesson` node. The Learner still 
 
 ### Places and local names
 
-Intake finds the place of a message from the landmark list and the local names people use. The list has three sources:
+Intake finds the place of a message from four clues: a landmark, a neighbourhood, a road and a ward number. It matches the names against the region graph, so the names on the map are the names that Intake knows. The names have these sources:
 
 - **Hand-written landmarks** in `LANDMARKS` in the area file. They win over an OpenStreetMap place at the same spot.
-- **Named places from OpenStreetMap** in `areas/<area>_places.json`, made by `python -m reliefnet.areas.import_osm <area> --places`.
-- **Places and local names that coordinators add** in the dashboard (**Places**). ReliefNet keeps them per area in Redis, so they stay after a region rebuild.
+- **Named places and neighbourhoods from OpenStreetMap** in `areas/<area>_places.json`, made by `python -m reliefnet.areas.import_osm <area> --places`. A neighbourhood keeps its outline when OpenStreetMap has one.
+- **Real road names** from the road import. Names that the importer made, such as "Lane near Kali Mandir", are not clues.
+- **Places and local names that coordinators add** in the dashboard (**Places**). ReliefNet keeps them per area in Redis, so they stay after a region rebuild. A local name can go on a landmark or on a neighbourhood.
 
-A new local name reaches Intake on the next message. Landmarks are in the shared region graph, so a name helps every organisation.
+The landmark gives the point. A named road near the landmark moves the point onto the road. The neighbourhood and the ward narrow the area and must agree. Each clue that agrees raises `geo_confidence`, and a clue that does not agree lowers it. The Request keeps the matched `neighbourhood` and `road`, and the Intake reason lists the clues, so **Ask why** can explain the location. See the scoring table in [docs/AREAS.md](docs/AREAS.md#location-clues-in-a-help-request).
+
+The rule-based Intake and the model Intake use the same exact name match for neighbourhoods and roads, so the result is the same with no model key.
+
+A new local name reaches Intake on the next message. Landmarks and neighbourhoods are in the shared region graph, so a name helps every organisation.
 
 | Endpoint | Role |
 |---|---|
-| `GET /api/region/landmarks` | Coordinator or admin |
+| `GET /api/region/landmarks` (landmarks and neighbourhoods) | Coordinator or admin |
 | `POST /api/region/landmarks` | Coordinator or admin |
-| `POST /api/region/landmarks/{id}/aliases` | Coordinator or admin |
+| `POST /api/region/landmarks/{id}/aliases` (a landmark ID or a neighbourhood ID) | Coordinator or admin |
+
+`GET /api/ops/region` returns `neighbourhoods` as a list of `{id, name, aliases, ward, lat, lon, polygon}`. `polygon` is a list of `[lat, lon]`, or `null` when OpenStreetMap has only a centre.
 
 ### Map and area
 
@@ -275,6 +282,8 @@ The dashboard draws the same layers in two ways:
 - **The built-in chart**, with no key or when Google refuses the key. It works offline.
 
 The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / All** switch also selects the map style. Google's map labels are in English. An **EN / हिं** label switch is ready but hidden for now; set `LANG_SWITCH` to `true` in `frontend/src/components/GoogleMap.tsx` to show it.
+
+The map shows no Google labels. ReliefNet draws the names of neighbourhoods, roads and landmarks from its own data, so a name on the map is a name that Intake can match. To turn off Google's labels, import `docs/google-map-style-no-labels.json` into the Map Style of `GOOGLE_MAPS_MAP_ID`. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
 
 The map keeps the operation area in focus. It dims the world outside the area and draws a line around it. Households that sit close together on the screen become one bubble with a count; click the bubble to zoom in. A household with priority 70 or more shows its score on a pill. Each team shows its name and its number of jobs. The route of the selected household is bold, and the other routes are faint.
 
@@ -352,7 +361,7 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `AREA` | `patna` | The place on the map: `patna` or `ganga_nagar`. A change rebuilds the region and the org graphs. |
 | `GOOGLE_MAPS_API_KEY` | empty | Shows a Google map under the layers. Without it, the built-in chart shows. |
 | `GOOGLE_MAPS_MAP_ID` | empty | Vector Map ID for smooth layers. Without it, the map uses Google's test id `DEMO_MAP_ID`. |
-| `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with all of Google's places. It enables the **Clean / All** switch on the map. |
+| `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with Google's labels and places. It enables the **Clean / All** switch on the map. |
 | `FIELD_SHOW_PHONE` | `false` | `true` shows a **Call** button on the next job in the field app. It calls the contact number, or else the household's own number. Phone numbers are personal data, so turn it on only when your organisation agrees. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |

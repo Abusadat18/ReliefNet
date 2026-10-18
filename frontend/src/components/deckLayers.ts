@@ -5,6 +5,7 @@ import type { FamilyPoint, Landmark, Region, Road, RouteLine, Shelter, TeamPoint
 import { clusterFamilies, clusterRing, type Cluster } from "./clusters";
 import type { Visible } from "./LayersMenu";
 import type { Flash } from "./MapLayers";
+import { mapNames, type MapLabel } from "./labels";
 import { chipOffsets, type MemoryChip, type MemoryView } from "./memory";
 
 type RGBA = [number, number, number, number];
@@ -93,7 +94,6 @@ const pxPerDeg = (zoom: number) => (256 * 2 ** zoom) / 360;
  */
 export function buildLayers(d: DeckInput): Layer[] {
   const c = d.colours;
-  const zoomedIn = d.zoom >= 16;
   const show = d.show;
   const news = d.region.roads.filter((r) => r.kind !== "road" || r.status !== "open" || (show.low && r.low_lying));
   const families = d.families.filter((f) => show.served || f.status !== "SERVED");
@@ -103,11 +103,8 @@ export function buildLayers(d: DeckInput): Layer[] {
   const routes = show.routes ? d.routes : d.routes.filter((rt) => rt.id === focus);
   const focused = routes.filter((rt) => rt.id === focus);
   const flooded = d.region.roads.filter((r) => r.status === "flooded");
-  const roadLabels = [
-    ...new Map(
-      d.region.roads.filter((r) => r.status === "flooded" || (zoomedIn && r.kind !== "road")).map((r) => [r.name, r] as const),
-    ).values(),
-  ];
+  const names = mapNames(d.region, d.zoom, show);
+  const labelsOf = (kind: MapLabel["kind"]) => names.labels.filter((l) => l.kind === kind);
   const statusKey = d.region.roads.map((r) => r.status[0]).join("");
 
   // Households closer than 22 px on screen become one count bubble, until the map is close in.
@@ -149,6 +146,8 @@ export function buildLayers(d: DeckInput): Layer[] {
     outlineColor: c.paper,
     sizeUnits: "pixels" as const,
   };
+  // Our names replace Google's labels, so they get a wider paper halo to read on any base.
+  const name = { ...text, outlineWidth: 0.3, getPosition: (l: MapLabel) => [l.lon, l.lat] as LonLat, getText: (l: MapLabel) => l.text };
   const pill = {
     ...text,
     outlineWidth: 0,
@@ -218,6 +217,13 @@ export function buildLayers(d: DeckInput): Layer[] {
       ...text,
       fontFamily: MONO,
     }),
+    new TextLayer<MapLabel>({
+      id: "neighbourhood-names",
+      data: labelsOf("hood"),
+      getSize: (l) => l.size,
+      getColor: alpha(c.ink2, 220),
+      ...name,
+    }),
     // Every road can be clicked to report it. The paths are transparent because Google
     // draws the streets; deck.gl still picks transparent paths.
     new PathLayer<Road>({
@@ -276,6 +282,16 @@ export function buildLayers(d: DeckInput): Layer[] {
       capRounded: true,
       jointRounded: true,
     }),
+    new TextLayer<MapLabel>({
+      id: "road-names",
+      data: labelsOf("road"),
+      getAngle: (l) => l.angle,
+      getSize: (l) => l.size,
+      getColor: (l) => (l.strong ? c.ink : c.ink2),
+      ...name,
+      fontWeight: 500,
+      updateTriggers: { getColor: c.ink },
+    }),
     new TextLayer<Road>({
       id: "flood-marks",
       data: flooded,
@@ -295,20 +311,18 @@ export function buildLayers(d: DeckInput): Layer[] {
       sizeUnits: "pixels",
       updateTriggers: { getIcon: shelterIcon.url },
     }),
-    new TextLayer<Shelter>({
+    new TextLayer<MapLabel>({
       id: "shelter-names",
-      data: zoomedIn && show.places ? d.region.shelters : [],
-      getPosition: (s) => [s.lon, s.lat],
-      getText: (s) => s.name,
-      getPixelOffset: [16, 0],
+      data: labelsOf("shelter"),
+      getPixelOffset: (l) => [l.dx, l.dy],
       getTextAnchor: "start",
-      getSize: 11,
+      getSize: (l) => l.size,
       getColor: c.served,
-      ...text,
+      ...name,
     }),
     new ScatterplotLayer<Landmark>({
       id: "landmarks",
-      data: zoomedIn && show.places ? d.region.landmarks : [],
+      data: names.dots,
       getPosition: (l) => [l.lon, l.lat],
       getRadius: 2.5,
       radiusUnits: "pixels",
@@ -318,17 +332,14 @@ export function buildLayers(d: DeckInput): Layer[] {
       lineWidthUnits: "pixels",
       getLineWidth: 1,
     }),
-    new TextLayer<Landmark>({
+    new TextLayer<MapLabel>({
       id: "landmark-names",
-      // OpenStreetMap adds hundreds of small places; name them only when the map is close in.
-      data: zoomedIn && show.places ? d.region.landmarks.filter((l) => l.source !== "osm" || d.zoom >= 17.5) : [],
-      getPosition: (l) => [l.lon, l.lat],
-      getText: (l) => l.name,
-      getPixelOffset: [6, -8],
+      data: labelsOf("landmark"),
+      getPixelOffset: (l) => [l.dx, l.dy],
       getTextAnchor: "start",
-      getSize: 11,
+      getSize: (l) => l.size,
       getColor: c.ink2,
-      ...text,
+      ...name,
       fontWeight: 500,
     }),
     new ScatterplotLayer<{ id: string; lat: number; lon: number }>({
@@ -432,17 +443,14 @@ export function buildLayers(d: DeckInput): Layer[] {
       ...pill,
       getBorderWidth: 0,
     }),
-    new TextLayer<Road>({
-      id: "road-names",
-      data: roadLabels,
-      getPosition: (r) => middle(r.coords),
-      getText: (r) => r.name,
-      getPixelOffset: [12, 0],
+    new TextLayer<MapLabel>({
+      id: "flood-names",
+      data: labelsOf("flood"),
+      getPixelOffset: (l) => [l.dx, l.dy],
       getTextAnchor: "start",
-      getSize: 12,
-      getColor: (r) => (r.status === "flooded" ? c.hazard : c.ink),
-      ...text,
-      updateTriggers: { getColor: [statusKey, c.hazard] },
+      getSize: (l) => l.size,
+      getColor: c.hazard,
+      ...name,
     }),
     new ScatterplotLayer<Flash>({
       id: "flashes",

@@ -8,8 +8,9 @@ The script writes `<area>.json` next to the area module. Commit that file. The
 app reads it at seed time and never calls OpenStreetMap while it runs.
 
 `--places` writes only `<area>_places.json`: temples, mosques, hospitals, schools,
-markets, stations, parks and other named places (see `places.py`). It does not
-touch the roads, so the junction ids and every organisation's graph stay valid.
+markets, stations, parks and other named places, and the named neighbourhoods
+(see `places.py`). It does not touch the roads, so the junction ids and every
+organisation's graph stay valid.
 
 The graph keeps the streets that connect: short dead ends go, but the side
 lanes stay, because they are the detours when a main road floods."""
@@ -66,6 +67,8 @@ def places_query(bbox: tuple[float, float, float, float]) -> str:
         f'nwr["leisure"~"^(park|stadium|sports_centre)$"]["name"]({box});'
         f'nwr["shop"="mall"]["name"]({box});'
         ");out tags center;"
+        # Neighbourhoods keep their outline, so they need the full geometry.
+        f'nwr["place"~"^({"|".join(places.NEIGHBOURHOOD_PLACES)})$"]["name"]({box});out geom;'
     )
 
 
@@ -468,22 +471,29 @@ def _split_distant_namesakes(g: Graph, names: dict[int, str], area, mid) -> None
 
 
 def write_places(osm: dict, area) -> None:
-    rows = places.from_osm(osm, area.BBOX, city=getattr(area, "CITY", area.TITLE.rsplit(",", 1)[-1].strip()))
-    out = {
+    city = getattr(area, "CITY", area.TITLE.rsplit(",", 1)[-1].strip())
+    rows = places.from_osm(osm, area.BBOX, city=city)
+    hoods = places.neighbourhoods_from_osm(osm, area.BBOX, city=city)
+    head = {
         "area": area.NAME,
         "bbox": area.BBOX,
         "attribution": places.ATTRIBUTION,
         "osm_timestamp": osm.get("osm3s", {}).get("timestamp_osm_base", ""),
         "imported": date.today().isoformat(),
-        "places": rows,
     }
     target = places.path(area)
+
     # One place on each line keeps a new import easy to review.
-    body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
-    head = json.dumps({k: v for k, v in out.items() if k != "places"}, ensure_ascii=False, separators=(",", ":"))
-    target.write_text(f'{head[:-1]},"places":[\n{body}\n]}}\n', encoding="utf-8")
+    def lines(items: list[dict]) -> str:
+        return ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in items)
+
+    top = json.dumps(head, ensure_ascii=False, separators=(",", ":"))
+    target.write_text(f'{top[:-1]},"places":[\n{lines(rows)}\n],"neighbourhoods":[\n{lines(hoods)}\n]}}\n',
+                      encoding="utf-8")
     kinds = Counter(r["kind"] for r in rows)
-    print(f"{target.name}: {len(rows)} places {dict(sorted(kinds.items()))}")
+    print(f"{target.name}: {len(rows)} places {dict(sorted(kinds.items()))}, {len(hoods)} neighbourhoods")
+    for h in hoods:
+        print(f"   {h['name']} ({h['place']}, {'outline' if h['polygon'] else 'point'})")
 
 
 def main() -> None:

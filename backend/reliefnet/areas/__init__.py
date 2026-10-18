@@ -77,6 +77,8 @@ class Region:
     roads: list[Road] = field(default_factory=list)
     wards: list[dict] = field(default_factory=list)
     landmarks: list[dict] = field(default_factory=list)
+    # Named neighbourhoods (see `places.neighbourhoods`), each with an outline or only a centre.
+    neighbourhoods: list[dict] = field(default_factory=list)
     shelters: list[dict] = field(default_factory=list)
     # Water areas as closed polygons (a wide river) and lines (drains, canals).
     water_areas: list[dict] = field(default_factory=list)
@@ -111,9 +113,12 @@ def region(name: str | None = None) -> Region:
     m = module(name)
     reg = m.build_region()
     osm = places.load(m)
-    if osm:
+    if osm or places.load_neighbourhoods(m):
         reg.attribution = f"{reg.attribution}. {places.ATTRIBUTION}" if reg.attribution else places.ATTRIBUTION
-    blocked = [reg.title, *(w["name"] for w in reg.wards), *{r.name for r in reg.roads}]
+    reg.neighbourhoods = places.neighbourhoods(getattr(m, "NEIGHBOURHOODS", []), places.load_neighbourhoods(m),
+                                               reg.wards)
+    blocked = [reg.title, *(w["name"] for w in reg.wards), *{r.name for r in reg.roads},
+               *(n["name"] for n in reg.neighbourhoods)]
     reg.landmarks = places.merge(reg.landmarks, osm, reg.wards, blocked)
     return reg
 
@@ -132,9 +137,10 @@ def version(name: str | None = None) -> str:
 
 
 def landmark_version(name: str | None = None) -> str:
-    """Changes when a hand-written landmark or an imported OpenStreetMap place changes."""
+    """Changes when a hand-written landmark, an imported OpenStreetMap place or a neighbourhood changes."""
     reg = region(name)
-    return _digest({"landmarks": reg.landmarks, "attribution": reg.attribution})
+    return _digest({"landmarks": reg.landmarks, "neighbourhoods": reg.neighbourhoods,
+                    "attribution": reg.attribution})
 
 
 def junction_version(name: str | None = None) -> str:
@@ -159,6 +165,48 @@ def point_in_polygon(lat: float, lon: float, poly: list[list[float]]) -> bool:
             inside = not inside
         j = i
     return inside
+
+
+def _xy(lat: float, lon: float, lat0: float) -> tuple[float, float]:
+    return lon * 111_320 * math.cos(math.radians(lat0)), lat * 110_540
+
+
+def nearest_on_line(lat: float, lon: float, line: list[list[float]]) -> tuple[float, list[float]]:
+    """The point on a polyline nearest to (lat, lon), and its distance in metres."""
+    if len(line) == 1:
+        return haversine_m(lat, lon, *line[0]), list(line[0])
+    px, py = _xy(lat, lon, lat)
+    best = (math.inf, list(line[0]))
+    for a, b in zip(line, line[1:]):
+        ax, ay = _xy(*a, lat)
+        bx, by = _xy(*b, lat)
+        dx, dy = bx - ax, by - ay
+        t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        d = math.hypot(px - ax - t * dx, py - ay - t * dy)
+        if d < best[0]:
+            best = (d, [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])])
+    return best
+
+
+def polygon_area_m2(poly: list[list[float]]) -> float:
+    if len(poly) < 3:
+        return 0.0
+    lat0 = sum(p[0] for p in poly) / len(poly)
+    pts = [_xy(*p, lat0) for p in poly]
+    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))) / 2
+
+
+def polygon_centre(poly: list[list[float]]) -> tuple[float, float]:
+    """The area centroid of a polygon, or the mean of its points when it has no area."""
+    a = cx = cy = 0.0
+    for (y1, x1), (y2, x2) in zip(poly, poly[1:] + poly[:1]):
+        cross = x1 * y2 - x2 * y1
+        a += cross
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+    if abs(a) < 1e-12:
+        return sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly)
+    return cy / (3 * a), cx / (3 * a)
 
 
 def nearest_junction(reg: Region, lat: float, lon: float) -> Junction:

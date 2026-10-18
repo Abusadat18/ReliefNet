@@ -148,6 +148,7 @@ async def region(user: User = Depends(current_user)):
         "roads": await routing.snapshot(),
         "wards": await geo.wards(),
         "landmarks": await geo.landmarks(),
+        "neighbourhoods": await geo.neighbourhoods(),
         "shelters": shelters,
         "water_areas": json.loads(meta.get("water_areas") or "[]"),
         "water_lines": json.loads(meta.get("water_lines") or "[]"),
@@ -499,6 +500,7 @@ async def tenancy(user: User = Depends(require("coordinator"))):
 
 # ---------------------------------------------------------------- landmarks
 # Landmarks are in the shared region graph, so a local name added here helps every organisation.
+# The alias route also takes a neighbourhood id ("N..."): neighbourhoods have local names too.
 class AliasIn(BaseModel):
     alias: str = Field(min_length=2, max_length=60)
 
@@ -517,7 +519,8 @@ def _gazetteer_error(e: gazetteer.GazetteerError) -> HTTPException:
 
 @app.get("/api/region/landmarks")
 async def region_landmarks(user: User = Depends(require("coordinator"))):
-    return {"landmarks": await geo.landmarks(), "kinds": list(gazetteer.KINDS)}
+    return {"landmarks": await geo.landmarks(), "neighbourhoods": await geo.neighbourhoods(),
+            "kinds": list(gazetteer.KINDS)}
 
 
 @app.post("/api/region/landmarks/{lid}/aliases")

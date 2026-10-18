@@ -6,7 +6,10 @@ The hand-written landmarks stay authoritative: when an OpenStreetMap place is
 the same place, the hand-written name, position and aliases win.
 
 Each landmark has a `source`: "hand" (the area module), "osm" (this file) or
-"app" (added by a coordinator, see `gazetteer.py`)."""
+"app" (added by a coordinator, see `gazetteer.py`).
+
+The same file holds the named neighbourhoods (`neighbourhoods()`). Intake uses
+them as a location clue that narrows the area, together with the ward."""
 from __future__ import annotations
 
 import json
@@ -18,7 +21,7 @@ from types import ModuleType
 
 from rapidfuzz import fuzz
 
-from . import haversine_m, point_in_polygon
+from . import haversine_m, point_in_polygon, polygon_area_m2, polygon_centre
 
 ATTRIBUTION = "Place data © OpenStreetMap contributors (ODbL)"
 
@@ -59,6 +62,14 @@ def load(m: ModuleType) -> list[dict]:
     if not p.exists():
         return []
     return json.loads(p.read_text(encoding="utf-8"))["places"]
+
+
+def load_neighbourhoods(m: ModuleType) -> list[dict]:
+    """The area's OpenStreetMap neighbourhoods, or an empty list."""
+    p = path(m)
+    if not p.exists():
+        return []
+    return json.loads(p.read_text(encoding="utf-8")).get("neighbourhoods", [])
 
 
 def norm(text: str) -> str:
@@ -148,6 +159,154 @@ def from_osm(osm: dict, bbox: tuple[float, float, float, float], city: str = "")
         else:
             out.append(r)
     return sorted(out, key=lambda r: (r["kind"], r["name"], r["osm"]))
+
+
+# ------------------------------------------------------------------ neighbourhoods
+NEIGHBOURHOOD_PLACES = ("suburb", "quarter", "neighbourhood")
+# An outline smaller than this is a building or a joke edit ("friend's house"), not a neighbourhood.
+MIN_NEIGHBOURHOOD_M2 = 20_000.0
+OUTLINE_STEP_M = 15.0
+
+
+def _ring(members: list[dict]) -> list[list[float]]:
+    """The largest closed ring made from the outer ways of a multipolygon relation."""
+    parts = [[[p["lat"], p["lon"]] for p in mb["geometry"]] for mb in members
+             if mb.get("type") == "way" and mb.get("role", "outer") in ("outer", "") and mb.get("geometry")]
+    rings: list[list[list[float]]] = []
+    while parts:
+        ring = parts.pop(0)
+        grown = True
+        while grown and ring[0] != ring[-1]:
+            grown = False
+            for i, part in enumerate(parts):
+                if part[0] == ring[-1]:
+                    ring += part[1:]
+                elif part[-1] == ring[-1]:
+                    ring += part[::-1][1:]
+                elif part[-1] == ring[0]:
+                    ring = part + ring[1:]
+                elif part[0] == ring[0]:
+                    ring = part[::-1] + ring[1:]
+                else:
+                    continue
+                parts.pop(i)
+                grown = True
+                break
+        rings.append(ring)
+    return max(rings, key=polygon_area_m2, default=[])
+
+
+def _thin(ring: list[list[float]]) -> list[list[float]]:
+    if ring and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    out: list[list[float]] = []
+    for p in ring:
+        if not out or haversine_m(*out[-1], *p) >= OUTLINE_STEP_M:
+            out.append([round(p[0], 6), round(p[1], 6)])
+    return out
+
+
+def neighbourhoods_from_osm(osm: dict, bbox: tuple[float, float, float, float], city: str = "") -> list[dict]:
+    """The named suburbs, quarters and neighbourhoods in an Overpass answer (`out geom`).
+
+    A way or a relation keeps its outline. A node has only a centre, and its `polygon` is None."""
+    s, w, n, e = bbox
+    rows: list[dict] = []
+    for el in osm.get("elements", []):
+        tags = el.get("tags", {})
+        if tags.get("place") not in NEIGHBOURHOOD_PLACES:
+            continue
+        en = (tags.get("name:en") or "").strip()
+        local = (tags.get("name") or "").strip()
+        name = _clean(en or local, city)
+        if not name or is_generic(name) or not re.search(r"[a-z]", name.casefold()):
+            continue
+        poly = None
+        if el["type"] == "node":
+            lat, lon = el["lat"], el["lon"]
+        else:
+            if el["type"] == "way":
+                ring = [[p["lat"], p["lon"]] for p in el.get("geometry", [])]
+            else:
+                ring = _ring(el.get("members", []))
+            poly = _thin(ring)
+            if len(poly) < 3 or polygon_area_m2(poly) < MIN_NEIGHBOURHOOD_M2:
+                continue
+            lat, lon = polygon_centre(poly)
+        inside = s <= lat <= n and w <= lon <= e
+        if not inside and not any(s <= p[0] <= n and w <= p[1] <= e for p in poly or []):
+            continue
+        others = [local, tags.get("name:hi", "")]
+        for key in ("alt_name", "old_name", "short_name", "loc_name", "alt_name:en"):
+            others += tags.get(key, "").split(";")
+        alt = sorted({_clean(x, city) for x in others if x.strip() and norm(_clean(x, city)) != norm(name)})
+        rows.append({"osm": f"{el['type'][0]}{el['id']}", "name": name, "alt": alt, "place": tags["place"],
+                     "lat": round(lat, 6), "lon": round(lon, 6), "polygon": poly})
+    # A node and an outline with one name are one neighbourhood. Keep the outline.
+    out: list[dict] = []
+    for r in sorted(rows, key=lambda r: (r["polygon"] is None, r["osm"])):
+        twin = next((o for o in out if norm(o["name"]) == norm(r["name"]) and (
+            (o["polygon"] and point_in_polygon(r["lat"], r["lon"], o["polygon"]))
+            or haversine_m(o["lat"], o["lon"], r["lat"], r["lon"]) < OSM_TWIN_M)), None)
+        if twin:
+            twin["alt"] = sorted(set(twin["alt"]) | {a for a in r["alt"] if norm(a) != norm(twin["name"])})
+        else:
+            out.append(r)
+    return sorted(out, key=lambda r: (r["name"], r["osm"]))
+
+
+def _main_ward(wards: list[dict], nb: dict) -> int:
+    """The ward that holds most of a neighbourhood, or the ward of its centre."""
+    poly = nb.get("polygon")
+    if not poly:
+        return _ward_of(wards, nb["lat"], nb["lon"])
+    lats, lons = [p[0] for p in poly], [p[1] for p in poly]
+    votes: Counter = Counter()
+    for i in range(12):
+        for j in range(12):
+            lat = min(lats) + (i + 0.5) / 12 * (max(lats) - min(lats))
+            lon = min(lons) + (j + 0.5) / 12 * (max(lons) - min(lons))
+            if point_in_polygon(lat, lon, poly):
+                votes[_ward_of(wards, lat, lon)] += 1
+    votes.pop(0, None)
+    return votes.most_common(1)[0][0] if votes else _ward_of(wards, nb["lat"], nb["lon"])
+
+
+def neighbourhoods(hand: list, osm_rows: list[dict], wards: list[dict]) -> list[dict]:
+    """The area's neighbourhoods: the area module's `NEIGHBOURHOODS` first, then OpenStreetMap's.
+
+    A `hand` row is (name, aliases, lat, lon) or (name, aliases, lat, lon, polygon). A neighbourhood
+    outside every ward is dropped. Two neighbourhoods with one name get the ward in the name."""
+    out: list[dict] = []
+    for i, (name, aliases, lat, lon, *rest) in enumerate(hand):
+        out.append({"id": f"N{i + 1:02d}", "name": name, "aliases": [norm(a) for a in aliases if not is_generic(a)],
+                    "lat": lat, "lon": lon, "polygon": rest[0] if rest else None, "source": "hand"})
+    for r in osm_rows:
+        if any(norm(o["name"]) == norm(r["name"]) and haversine_m(o["lat"], o["lon"], r["lat"], r["lon"])
+               < SAME_PLACE_M for o in out):
+            continue
+        out.append({"id": f"N{r['osm']}", "name": r["name"], "aliases": auto_aliases(r["name"], r.get("alt", [])),
+                    "lat": r["lat"], "lon": r["lon"], "polygon": r.get("polygon"), "source": "osm"})
+    keep = []
+    for nb in out:
+        nb["ward"] = _main_ward(wards, nb)
+        if nb["ward"]:
+            keep.append(nb)
+    ward_name = {wd["num"]: wd["name"] for wd in wards}
+    by_name: dict[str, list[dict]] = defaultdict(list)
+    for nb in keep:
+        by_name[norm(nb["name"])].append(nb)
+    for key, group in by_name.items():
+        if len(group) < 2:
+            continue
+        used: Counter = Counter()
+        for nb in group:
+            base = f"{nb['name']}, {ward_name.get(nb['ward'], nb['ward'])}"
+            used[base] += 1
+            nb["name"] = base if used[base] == 1 else f"{base} {used[base]}"
+            if key not in nb["aliases"]:
+                nb["aliases"].insert(0, key)
+    return [{k: nb[k] for k in ("id", "name", "aliases", "ward", "lat", "lon", "polygon", "source")} for nb in keep]
 
 
 # ------------------------------------------------------------------ merge

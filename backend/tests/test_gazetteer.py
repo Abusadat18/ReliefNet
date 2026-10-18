@@ -45,6 +45,33 @@ async def test_new_alias_reaches_geo_and_survives_a_landmark_refresh(region):
     assert ALIAS not in next(l for l in await geo.landmarks() if l["id"] == lm["id"])["aliases"]
 
 
+async def test_neighbourhoods_are_seeded_and_take_local_names(region):
+    if not region.neighbourhoods:
+        pytest.skip("this area has no neighbourhoods")
+    rows = await geo.neighbourhoods()
+    assert sorted(n["id"] for n in rows) == sorted(n["id"] for n in region.neighbourhoods)
+    assert all(set(n) == {"id", "name", "aliases", "ward", "lat", "lon", "polygon"} for n in rows)
+    nb = region.neighbourhoods[0]
+    try:
+        await gazetteer.add_alias(nb["id"], ALIAS, by="pytest")
+        hit = await geo.resolve("", 0, "", seed="pytest", neighbourhood=ALIAS)
+        assert hit["neighbourhood"] == nb["name"] and hit["geo_confidence"] == "low"
+        await gazetteer.refresh_landmarks(region, areas.landmark_version())
+        again = next(n for n in await geo.neighbourhoods() if n["id"] == nb["id"])
+        assert ALIAS in again["aliases"]
+    finally:
+        await gazetteer.forget(nb["id"])
+    assert ALIAS not in next(n for n in await geo.neighbourhoods() if n["id"] == nb["id"])["aliases"]
+
+
+async def test_resolve_uses_a_real_road(region):
+    names = await geo.clue_road_names()
+    if not names:
+        pytest.skip("this area has no named roads")
+    hit = await geo.resolve("", 0, "", seed="pytest", road=names[0])
+    assert hit["road"] and hit["geo_confidence"] == "low"
+
+
 async def test_new_landmark_inside_the_area(region):
     w = region.wards[-1]
     lid = ""

@@ -1,4 +1,4 @@
-{"area":"patna","bbox":[25.585,85.14,25.618,85.18],"attribution":"Place data © OpenStreetMap contributors (ODbL)","osm_timestamp":"2026-10-18T09:05:36Z","imported":"2026-10-18","places":[
+{"area":"patna","bbox":[25.585,85.14,25.618,85.18],"attribution":"Place data © OpenStreetMap contributors (ODbL)","osm_timestamp":"2026-10-18T15:17:35Z","imported":"2026-10-18","places":[
 {"osm":"n10593368425","name":"Baptist Union Church","alt":[],"kind":"church","lat":25.615049,"lon":85.153646},
 {"osm":"n11698530054","name":"Ayan park","alt":[],"kind":"ground","lat":25.598152,"lon":85.176711},
 {"osm":"n12596245795","name":"Balu Pich","alt":[],"kind":"ground","lat":25.591109,"lon":85.170698},
@@ -252,4 +252,8 @@
 {"osm":"n7944687362","name":"Bhootnath","alt":["भूतनाथ"],"kind":"transport","lat":25.585475,"lon":85.173576},
 {"osm":"n13234324383","name":"Malahi Pakri","alt":[],"kind":"transport","lat":25.593508,"lon":85.157117},
 {"osm":"n8026641158","name":"Rajendra Nagar Terminal","alt":["राजेंद्र नगर टर्मिनल"],"kind":"transport","lat":25.603007,"lon":85.162345}
+],"neighbourhoods":[
+{"osm":"n11698593121","name":"RBI staff quarter","alt":[],"place":"quarter","lat":25.58984,"lon":85.170834,"polygon":null},
+{"osm":"n11698751026","name":"RBI staff quarter","alt":[],"place":"quarter","lat":25.605029,"lon":85.159028,"polygon":null},
+{"osm":"n1739922370","name":"Rajendra Nagar","alt":["राजेन्द्र नगर"],"place":"suburb","lat":25.600522,"lon":85.164008,"polygon":null}
 ]}
