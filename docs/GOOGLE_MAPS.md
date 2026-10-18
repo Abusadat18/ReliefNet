@@ -120,7 +120,7 @@ Make the light style:
 
 Note: Google calls POI density an experimental setting. You can set it only on a light style. Google applies it to the linked dark style too.
 
-Make the dark variant, so that **Night chart** works:
+Make the dark variant, so that the night chart works:
 
 1. Open the `reliefnet-clean` style.
 2. Click **Make a copy**.
@@ -141,7 +141,7 @@ Link the styles to the clean Map ID:
 
 Google can take some minutes to apply a changed style.
 
-The dashboard sends a colour scheme (light or dark) to the map. **Night chart** in the top bar selects the dark variant. **Day chart** selects the light variant. If the Map ID has no dark style, the map stays light at night.
+The dashboard sends a colour scheme (light or dark) to the map. The moon button in the top bar (**Night chart**) selects the dark variant. The sun button (**Day chart**) selects the light variant. If the Map ID has no dark style, the map stays light at night.
 
 ## Add a detailed map (optional)
 
@@ -164,7 +164,7 @@ The clean map hides shops, hotels and restaurants. Sometimes a coordinator needs
 10. Restart the API: `docker compose up -d api`, or restart `uvicorn` in local development.
 11. Reload the dashboard.
 
-The dashboard then shows a **Clean / Detailed** switch on the map. **Clean** uses `GOOGLE_MAPS_MAP_ID`. **Detailed** uses `GOOGLE_MAPS_MAP_ID_DETAILED`. Each browser remembers its choice.
+The dashboard then shows a **Clean / All** switch on the map. **Clean** uses `GOOGLE_MAPS_MAP_ID`. **All** uses `GOOGLE_MAPS_MAP_ID_DETAILED`. Each browser remembers its choice.
 
 If `GOOGLE_MAPS_MAP_ID_DETAILED` is empty, the dashboard does not show the switch.
 
@@ -181,18 +181,21 @@ Click **Layers** on the map to open the Layers menu. Each item shows or hides on
 - **Ward zones**: the 16 simple zones that messages refer to, for example "ward 11". They are not the official ward map.
 - **Team routes**: the route that Dispatch gives to each team.
 - **Served households**: the households that already got help.
-- **Low roads near drains**: the dotted roads that flood first.
+- **Low roads near drains**: the thin blue roads that flood first.
 - **Landmarks and shelters**: the named places from the gazetteer, and the relief camps.
 
 Each browser remembers its choice. Other people do not see your change. The Layers menu works on the Google map and on the built-in chart.
 
 ## Use the map
 
-- Drag to pan. Scroll or use **+** and **−** to zoom. Click **⤢** to show the whole area again.
-- Click **Satellite** to see the real ground. Click **Map** to go back.
-- Click a household to open it. Click any road to mark it flooded or open.
-- The map shows only the roads that carry news: bridges and flyovers, low roads near drains (dotted), reported roads (dashed) and flooded roads (with a cross). The other streets come from Google's map.
-- **Night chart** in the top bar also selects the dark variant of the Map Style.
+- Drag to pan. Scroll or use **+** and **−** to zoom. Click the square button below them to show the whole area again.
+- Click **Sat** to see the real ground. Click **Map** to go back.
+- Click **EN** or **हिं** to show Google's map labels in English or Hindi. Google loads the label language with its script, so the page reloads once. Each browser remembers its choice.
+- The map dims the world outside the operation area and draws a line around the area.
+- Click a household to open it. A bubble with a number holds households that sit close together on the screen. Click it to zoom in. A pill with a number is a household with priority 70 or more.
+- Click any road to mark it flooded or open.
+- The map shows only the roads that carry news: bridges and flyovers, low roads near drains (thin blue), reported roads (dashed) and flooded roads (with a cross). The other streets come from Google's map.
+- The moon button in the top bar also selects the dark variant of the Map Style.
 
 ## Problems
 
@@ -203,8 +206,9 @@ Each browser remembers its choice. Other people do not see your change. The Laye
 | The built-in chart shows and there is no message. | The API has no key. Check `GOOGLE_MAPS_API_KEY` in `.env`, then restart the API. |
 | The map is grey with "For development purposes only". | Billing is not enabled on the Google Cloud project. |
 | The map has the plain Google style. | No Map Style is linked to the Map ID, or the dashboard uses `DEMO_MAP_ID`. Set `GOOGLE_MAPS_MAP_ID` and link a Map Style to it. Then restart the API and reload. |
-| The map has no **Clean / Detailed** switch. | `GOOGLE_MAPS_MAP_ID_DETAILED` is empty. Set it to a second vector Map ID, then restart the API and reload. |
-| **Detailed** looks the same as **Clean**. | The two Map IDs have the same Map Style. Link a style with all places to the detailed Map ID. |
+| The map has no **Clean / All** switch. | `GOOGLE_MAPS_MAP_ID_DETAILED` is empty. Set it to a second vector Map ID, then restart the API and reload. |
+| **All** looks the same as **Clean**. | The two Map IDs have the same Map Style. Link a style with all places to the detailed Map ID. |
+| Restaurants and shops show at night, but not in the day. | The dark copy of the Map Style still shows those map features. Turn off the same features in the dark copy. |
 | Shops and hotels still show on the clean map. | The Map Style still shows those map features, or Google has not applied the change yet. Check the visibility of each feature, then wait some minutes. |
-| The map stays light with **Night chart**. | The Map Style has no dark variant. Add a dark variant to the Map Style. |
+| The map stays light with the night chart. | The Map Style has no dark variant. Add a dark variant to the Map Style. |
 | The map shows, but the layers do not show, or the browser console shows a WebGL error. | The browser or the GPU has WebGL disabled. Enable hardware acceleration in the browser settings. To use the built-in chart, remove `GOOGLE_MAPS_API_KEY` from `.env` and restart the API. |

@@ -77,6 +77,6 @@ Use a place that you know, or a famous flood from the news. Local knowledge make
 
 ## Data licence
 
-OpenStreetMap data is © OpenStreetMap contributors, under the Open Database License (ODbL). The dashboard shows this credit in the chart's cartouche. Keep the credit if you publish ReliefNet with OpenStreetMap data.
+OpenStreetMap data is © OpenStreetMap contributors, under the Open Database License (ODbL). The dashboard shows this credit in the **Shift status** card on the map. Keep the credit if you publish ReliefNet with OpenStreetMap data.
 
 The named places in `<area>_places.json` also come from OpenStreetMap under the ODbL. The Places dialog shows the credit for them.

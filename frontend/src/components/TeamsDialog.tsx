@@ -1,8 +1,19 @@
+import { PlusIcon } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { needLabel, useResource } from "../hooks";
 import type { Region, Team, TeamRules } from "../types";
 import { Dialog } from "./Dialogs";
+import { ErrorLine, ResultLine } from "./kit";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface Place {
   key: string;
@@ -66,8 +77,7 @@ export function TeamsDialog({
       setResult(
         r.status === "active"
           ? `${r.name} is on duty. Dispatch can give it new requests.`
-          : `${r.name} is off duty.` +
-              (r.rerouted.length ? ` ${r.rerouted.length} assignment(s) went back to Dispatch.` : ""),
+          : `${r.name} is off duty.` + (r.rerouted.length ? ` ${r.rerouted.length} assignment(s) went back to Dispatch.` : ""),
       );
       await teams.reload();
     } catch (e) {
@@ -80,102 +90,105 @@ export function TeamsDialog({
   const list = teams.data ?? [];
 
   return (
-    <Dialog title="Teams" onClose={onClose} wide>
+    <Dialog
+      title="Teams"
+      onClose={onClose}
+      wide
+      description={
+        view.kind === "list"
+          ? `Dispatch gives requests only to teams on duty. A team off duty keeps its history.${isAdmin ? "" : " Only an admin can add or edit a team."}`
+          : undefined
+      }
+      footer={
+        view.kind === "list" && isAdmin ? (
+          <Button
+            onClick={() => {
+              setResult(null);
+              setView({ kind: "add" });
+            }}
+          >
+            <PlusIcon data-icon="inline-start" />
+            Add team
+          </Button>
+        ) : undefined
+      }
+    >
       {view.kind === "list" ? (
         <>
-          <p>
-            Dispatch gives requests only to teams on duty. A team off duty keeps its history.
-            {isAdmin ? "" : " Only an admin can add or edit a team."}
-          </p>
-          {isAdmin && (
-            <div className="row">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  setResult(null);
-                  setView({ kind: "add" });
-                }}
-              >
-                Add team
-              </button>
-            </div>
-          )}
-          {teams.error && <p className="error">{teams.error}</p>}
+          {teams.error && <ErrorLine>{teams.error}</ErrorLine>}
           {teams.data && list.length === 0 && (
-            <p>{isAdmin ? "No teams yet. Add your first team." : "No teams yet. Ask an admin to add a team."}</p>
+            <ResultLine>{isAdmin ? "No teams yet. Add your first team." : "No teams yet. Ask an admin to add a team."}</ResultLine>
           )}
           {list.length > 0 && (
-            <div className="team-table-wrap">
-              <table className="team-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Team</th>
-                    <th scope="col">Supplies</th>
-                    <th scope="col">Load</th>
-                    <th scope="col">Members</th>
-                    <th scope="col">Duty</th>
+            <div className="overflow-hidden rounded-xl border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>Team</TableHead>
+                    <TableHead>Supplies</TableHead>
+                    <TableHead>Load</TableHead>
+                    <TableHead>Members</TableHead>
+                    <TableHead>Duty</TableHead>
                     {isAdmin && (
-                      <th scope="col">
+                      <TableHead>
                         <span className="sr-only">Edit</span>
-                      </th>
+                      </TableHead>
                     )}
-                  </tr>
-                </thead>
-                <tbody>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {list.map((t) => {
                     const onDuty = t.status === "active";
                     return (
-                      <tr key={t.name} className={onDuty ? "" : "off"}>
-                        <th scope="row">{t.name}</th>
-                        <td>
-                          <span className="chips">
+                      <TableRow key={t.name} className={cn(!onDuty && "text-muted-foreground")}>
+                        <TableCell className="font-medium">{t.name}</TableCell>
+                        <TableCell>
+                          <span className="flex flex-wrap gap-1">
                             {(t.supplies ?? []).map((s) => (
-                              <span key={s} className="chip">
+                              <Badge key={s} variant="secondary">
                                 {needLabel(s)}
-                              </span>
+                              </Badge>
                             ))}
                           </span>
-                        </td>
-                        <td className="num">
-                          {t.load} of {t.capacity}
-                        </td>
-                        <td>{t.members.length ? t.members.join(", ") : <span className="muted">None</span>}</td>
-                        <td>
-                          <label className="toggle duty">
-                            <input
-                              type="checkbox"
-                              role="switch"
+                        </TableCell>
+                        <TableCell className="num">
+                          {t.load} / {t.capacity}
+                        </TableCell>
+                        <TableCell className="max-w-40 truncate">{t.members.length ? t.members.join(", ") : "None"}</TableCell>
+                        <TableCell>
+                          <label className="flex items-center gap-2 text-xs">
+                            <Switch
                               checked={onDuty}
                               disabled={busy === t.name}
-                              onChange={(e) => void setDuty(t, e.target.checked)}
+                              onCheckedChange={(on) => void setDuty(t, on)}
+                              aria-label={`${t.name} on duty`}
                             />
                             {onDuty ? "On duty" : "Off duty"}
                           </label>
-                        </td>
+                        </TableCell>
                         {isAdmin && (
-                          <td>
-                            <button
-                              type="button"
-                              className="btn small quiet"
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => {
                                 setResult(null);
                                 setView({ kind: "edit", team: t });
                               }}
                             >
                               Edit
-                            </button>
-                          </td>
+                            </Button>
+                          </TableCell>
                         )}
-                      </tr>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
-          {error && <p className="error">{error}</p>}
-          {result && <p className="result-line">{result}</p>}
+          {error && <ErrorLine>{error}</ErrorLine>}
+          {result && <ResultLine>{result}</ResultLine>}
         </>
       ) : (
         <TeamForm
@@ -222,8 +235,7 @@ function TeamForm({
   const shelters = places.shelters.filter(match);
   const max = rules?.capacity_max ?? 20;
 
-  const toggle = (s: string, on: boolean) =>
-    setSupplies((cur) => (on ? [...cur, s] : cur.filter((x) => x !== s)));
+  const toggle = (s: string, on: boolean) => setSupplies((cur) => (on ? [...cur, s] : cur.filter((x) => x !== s)));
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -251,90 +263,91 @@ function TeamForm({
   };
 
   return (
-    <form className="team-form" onSubmit={submit}>
-      <h3>{team ? `Edit ${team.name}` : "Add a team"}</h3>
-      {team ? (
-        <p>You cannot change the name of a team. Assignments and lessons use the name.</p>
-      ) : (
-        <div className="field">
-          <label htmlFor="team-name">Name</label>
-          <input
-            id="team-name"
-            className="input"
-            value={name}
-            maxLength={rules?.name_max ?? 40}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Boat Team North"
-            autoComplete="off"
-            required
+    <form onSubmit={submit} className="flex flex-col gap-5">
+      <h3 className="text-base font-medium">{team ? `Edit ${team.name}` : "Add a team"}</h3>
+      <FieldGroup>
+        {team ? (
+          <ResultLine>You cannot change the name of a team. Assignments and lessons use the name.</ResultLine>
+        ) : (
+          <Field>
+            <FieldLabel htmlFor="team-name">Name</FieldLabel>
+            <Input
+              id="team-name"
+              value={name}
+              maxLength={rules?.name_max ?? 40}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Boat Team North"
+              autoComplete="off"
+              required
+            />
+          </Field>
+        )}
+        <FieldSet>
+          <FieldLegend variant="label">Supplies</FieldLegend>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {(rules?.supplies ?? []).map((s) => (
+              <Field key={s} orientation="horizontal">
+                <Checkbox id={`sup-${s}`} checked={supplies.includes(s)} onCheckedChange={(c) => toggle(s, c === true)} />
+                <FieldLabel htmlFor={`sup-${s}`} className="font-normal">
+                  {needLabel(s)}
+                </FieldLabel>
+              </Field>
+            ))}
+          </div>
+        </FieldSet>
+        <Field>
+          <FieldLabel htmlFor="team-cap">Capacity: active assignments at one time (1 to {max})</FieldLabel>
+          <Input
+            id="team-cap"
+            className="num w-28"
+            type="number"
+            min={1}
+            max={max}
+            value={capacity}
+            onChange={(e) => setCapacity(Math.round(+e.target.value))}
           />
-        </div>
-      )}
-      <fieldset className="field supplies">
-        <legend>Supplies</legend>
-        <div className="supply-grid">
-          {(rules?.supplies ?? []).map((s) => (
-            <label key={s} className="toggle">
-              <input type="checkbox" checked={supplies.includes(s)} onChange={(e) => toggle(s, e.target.checked)} />
-              {needLabel(s)}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      <div className="field">
-        <label htmlFor="team-cap">Capacity: active assignments at one time (1 to {max})</label>
-        <input
-          id="team-cap"
-          className="input num"
-          style={{ width: 110 }}
-          type="number"
-          min={1}
-          max={max}
-          value={capacity}
-          onChange={(e) => setCapacity(Math.round(+e.target.value))}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="team-base">{team ? "Base (optional)" : "Base"}</label>
-        <input
-          className="input"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Type to filter landmarks and shelters"
-          aria-label="Filter the base list"
-          autoComplete="off"
-        />
-        <select id="team-base" className="input" value={base} onChange={(e) => setBase(e.target.value)}>
-          <option value="">{team ? "Keep the current base" : "Select a landmark or a shelter"}</option>
-          {landmarks.length > 0 && (
-            <optgroup label="Landmarks">
-              {landmarks.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {shelters.length > 0 && (
-            <optgroup label="Shelters">
-              {shelters.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
-        <span className="result-line">The team starts its routes from the nearest road junction.</span>
-      </div>
-      {error && <p className="error">{error}</p>}
-      <div className="row">
-        <button type="submit" className="btn primary" disabled={busy || !rules}>
-          {team ? "Save" : "Add team"}
-        </button>
-        <button type="button" className="btn quiet" onClick={onCancel}>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="team-base">{team ? "Base (optional)" : "Base"}</FieldLabel>
+          <Input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Type to filter landmarks and shelters"
+            aria-label="Filter the base list"
+            autoComplete="off"
+          />
+          <NativeSelect id="team-base" value={base} onChange={(e) => setBase(e.target.value)}>
+            <NativeSelectOption value="">{team ? "Keep the current base" : "Select a landmark or a shelter"}</NativeSelectOption>
+            {landmarks.length > 0 && (
+              <NativeSelectOptGroup label="Landmarks">
+                {landmarks.map((p) => (
+                  <NativeSelectOption key={p.key} value={p.key}>
+                    {p.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelectOptGroup>
+            )}
+            {shelters.length > 0 && (
+              <NativeSelectOptGroup label="Shelters">
+                {shelters.map((p) => (
+                  <NativeSelectOption key={p.key} value={p.key}>
+                    {p.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelectOptGroup>
+            )}
+          </NativeSelect>
+          <FieldDescription>The team starts its routes from the nearest road junction.</FieldDescription>
+        </Field>
+      </FieldGroup>
+      {error && <ErrorLine>{error}</ErrorLine>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
+        <Button type="submit" disabled={busy || !rules}>
+          {team ? "Save" : "Add team"}
+        </Button>
       </div>
     </form>
   );

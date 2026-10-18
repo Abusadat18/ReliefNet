@@ -16,7 +16,7 @@ Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coord
    docker compose up -d --build
    ```
 
-4. Open http://localhost:8080 and choose "Shift Coordinator" under Red Cross Patna.
+4. Open http://localhost:8080. On the front page, click **Open the ops room**, then choose "Shift Coordinator" under Red Cross Patna.
 5. Click **Flood drill**, then click **Start the drill**.
 
 The first build takes some minutes, because it downloads the multilingual embedding model into the image.
@@ -25,8 +25,10 @@ The map shows real streets of Rajendra Nagar and Kankarbagh in Patna. To show a 
 
 | Address | What it is |
 |---|---|
-| http://localhost:8080 | ReliefNet web app (operations chart, field app, help form) |
+| http://localhost:8080 | ReliefNet front page. Signed-in people go straight to their app. |
+| http://localhost:8080/login | Sign-in, then the ops room (coordinators) or the field app (volunteers) |
 | http://localhost:8080/help | Public help form (no sign-in) |
+| http://localhost:8080/about | The front page, also for people who are signed in |
 | http://localhost:8000/docs | API documentation |
 | http://localhost:3000 | FalkorDB Browser, to look at the raw graphs |
 
@@ -91,10 +93,10 @@ These steps follow the seven moments of the demo video.
 1. **Messages pour in.** Click **Flood drill**, then **Start the drill**. Messy Hinglish and English messages arrive, and households appear on the chart.
 2. **Duplicates merge.** The drill sends "pls help 5 ppl stuck near Shiv mandir ward 11 Kankarbagh…" and then "R. Kumar family, ward 11 near temple…". The Dedupe agent merges them into one household. Open the household to see the evidence (meaning, distance, ward, people count).
 3. **A road floods.** About one minute into the drill, two field teams report Malahi Pakdi Road flooded. It is the main road south through Kankarbagh, and it was under water in 2019. One report marks the road "reported". The second report confirms it, the road turns magenta, and every affected route goes back to Dispatch for a detour through the side lanes. You can also click any road and mark it flooded yourself.
-4. **An agent crashes.** Open the **Agents** tab and click **Stop** on a Dispatch agent while it is working. Its lease runs out after 8 seconds, and another Dispatch copy reclaims the request. The log shows "Dispatch-1 reclaimed R-… after Dispatch-2's lease expired". The cartouche counts "Requests reclaimed after a crash".
+4. **An agent crashes.** Open the **Agents** tab and click **Stop** on a Dispatch agent while it is working. Its lease runs out after 8 seconds, and another Dispatch copy reclaims the request. The log shows "Dispatch-1 reclaimed R-… after Dispatch-2's lease expired". The **Shift status** card on the map counts "Reclaimed after a crash".
 5. **Shift change.** Click **Shift handover**, then **Write a briefing now**. The Shift Coordinator also writes one automatically at each time in `SHIFT_TIMES`.
 6. **Ask why.** Type "Why hasn't the Das family been served?" in the bar at the bottom of the chart. The answer follows the household's path through the graph, agent by agent, with the reasons each agent recorded.
-7. **The numbers.** The cartouche shows households reached, households sent two teams (always 0), duplicates merged, messages per minute, reclaims, reroutes and merge accuracy against the drill's ground truth. For a load test, open **Flood drill** and send 300 or more messages at once.
+7. **The numbers.** The **Shift status** card shows households reached, households sent two teams (always 0), duplicates merged, messages per minute, reclaims, reroutes and merge accuracy against the drill's ground truth. For a load test, open **Flood drill** and send 300 or more messages at once.
 
 To show tenancy, sign in as the Sahyog Local NGO coordinator in a second browser. That organisation sees none of the Red Cross households, but it sees the same flooded roads.
 
@@ -144,7 +146,7 @@ Every request moves through five statuses. Each agent watches one status, does o
 | Dispatch | `TRIAGED` → `ASSIGNED` | Picks a team by supplies, route time, load and team lessons. Routes around flooded roads. Hands off to the team's field agent. | `algo.SPpaths` on the shared road graph; road lessons |
 | Field | `ASSIGNED` → `DELIVERED` | Chat for volunteers on the web or Telegram. Records deliveries, road reports, new needs and observations. | Fast model with seven tools (LangChain agent on LangGraph); rule-based intents offline |
 | Shift Coordinator | — | Writes handover briefings. Answers "why" questions from the household's path. | Path queries; smart model |
-| Learner | — | Turns field evidence into typed lessons, for example "Malahi Pakdi Road floods after 4 pm". Lessons gain confidence with new evidence and decay without it. | Smart model plus rules; procedural memory |
+| Learner | — | Turns field evidence into typed lessons, for example "Malahi Pakdi Road floods after 4 pm". Lessons gain confidence with new evidence and decay without it. Triage and Dispatch use a lesson at 50% confidence or more. A coordinator can apply a weaker lesson or dismiss any lesson in the **Lessons** tab. | Smart model plus rules; procedural memory |
 
 Several copies of an agent can run at once, in one process or on many machines. An agent claims an item with a lease in one atomic query, renews the lease while it works, and writes its result only while it still holds the lease. If an agent dies, its lease expires and another copy takes the item. No request is handled twice.
 
@@ -222,6 +224,21 @@ Open **Teams** on the operations screen to see each team's supplies, load, membe
 | `PATCH /api/ops/teams/{name}` | Admin |
 | `POST /api/ops/teams/{name}/duty` | Coordinator or admin |
 
+### Lessons
+
+Open **Lessons** on the operations screen to see what the Learner found. Triage and Dispatch use a lesson when its confidence is 50% or more.
+
+- Click **Apply now** to use a weaker lesson at once.
+- Click **Dismiss** to stop Triage and Dispatch from using a lesson.
+- Click **Clear** or **Restore** to give the decision back to the lesson's confidence.
+
+The override is the `override` property of the `Lesson` node. The Learner still updates the confidence, and the Live log shows who changed the lesson.
+
+| Endpoint | Role |
+|---|---|
+| `GET /api/ops/lessons` | Coordinator or admin |
+| `POST /api/ops/lessons/{key}/override` with `{"override": "on" \| "off" \| null}` | Coordinator or admin |
+
 ### Places and local names
 
 Intake finds the place of a message from the landmark list and the local names people use. The list has three sources:
@@ -255,7 +272,11 @@ The dashboard draws the same layers in two ways:
 - **Google Maps** under the layers, when `GOOGLE_MAPS_API_KEY` is set. It has a satellite view. A vector Map ID (`GOOGLE_MAPS_MAP_ID`) keeps the layers smooth when you zoom. See [docs/GOOGLE_MAPS.md](docs/GOOGLE_MAPS.md).
 - **The built-in chart**, with no key or when Google refuses the key. It works offline.
 
-The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / Detailed** switch also selects the map style.
+The **Layers** button on the map shows or hides each ReliefNet layer, and each browser remembers the choice. With `GOOGLE_MAPS_MAP_ID_DETAILED` set, a **Clean / All** switch also selects the map style. The **EN / हिं** switch sets the language of Google's map labels.
+
+The map keeps the operation area in focus. It dims the world outside the area and draws a line around it. Households that sit close together on the screen become one bubble with a count; click the bubble to zoom in. A household with priority 70 or more shows its score on a pill. Each team shows its name and its number of jobs. The route of the selected household is bold, and the other routes are faint.
+
+Each queue row has a graph receipt, for example `ASSIGNED_TO · Team 2 North`. Click it to read the household's edges and the agents' reasons from FalkorDB. The **Live log** shows the edge that each event wrote. The **Ask why** sheet has a **Graph query** tab with the read-only Cypher behind the answer.
 
 To add another real flood area, see [docs/AREAS.md](docs/AREAS.md).
 
@@ -322,7 +343,8 @@ All settings are environment variables. `.env.example` lists them with comments.
 | `AREA` | `patna` | The place on the map: `patna` or `ganga_nagar`. A change rebuilds the region and the org graphs. |
 | `GOOGLE_MAPS_API_KEY` | empty | Shows a Google map under the layers. Without it, the built-in chart shows. |
 | `GOOGLE_MAPS_MAP_ID` | empty | Vector Map ID for smooth layers. Without it, the map uses Google's test id `DEMO_MAP_ID`. |
-| `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with all of Google's places. It enables the **Clean / Detailed** switch on the map. |
+| `GOOGLE_MAPS_MAP_ID_DETAILED` | empty | Optional second vector Map ID with all of Google's places. It enables the **Clean / All** switch on the map. |
+| `FIELD_SHOW_PHONE` | `false` | `true` shows a **Call** button on the next job in the field app. It calls the contact number, or else the household's own number. Phone numbers are personal data, so turn it on only when your organisation agrees. |
 | `LEASE_MS` | `8000` | Lease length. Short for the demo. |
 | `DISPATCH_WORK_MS` | `2000` | Simulated planning time, so you can stop an agent mid-job |
 | `TELEGRAM_DEFAULT_ORG` | first by slug | Organisation that receives public Telegram requests |
@@ -350,7 +372,7 @@ backend/reliefnet/
   auth.py           dev sign-in and Clerk tokens; picks the org graph
   seed.py           creates the graphs, indexes and demo data
 backend/tests/      logic tests, graph tests, agent and auth tests
-frontend/src/       React app: operations chart, field app, help form
+frontend/src/       React app: front page, ops room, field app, help form (Tailwind CSS and shadcn/ui)
 docs/               setup guides (Clerk, Telegram, Google Maps, areas)
 docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 ```
@@ -374,6 +396,10 @@ docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 | The demo volunteers | `seed.py` |
 | Model provider or model names | `.env`: `MODEL_FAST`, `MODEL_SMART` (see [Language models](#language-models)) |
 | The dashboard | `frontend/src/pages/Ops.tsx` and `frontend/src/components/` |
+| The front page | `frontend/src/pages/Landing.tsx`; its photos are in `frontend/public/landing/` |
+| Colours, fonts and radius of the whole app | `frontend/src/index.css` (shadcn theme tokens, light and dark) |
+| Colours of the map and the built-in chart | `frontend/src/map.css` |
+| A shadcn/ui component | `frontend/src/components/ui/`. Add one with `npx shadcn@latest add <name>` in `frontend/`. |
 
 ## Useful commands
 

@@ -1,12 +1,29 @@
-import { useEffect, useMemo } from "react";
+import { ArrowRightIcon, RouteIcon } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
 import { needLabel } from "../hooks";
 import type { Trace, TraceNode } from "../types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+import { Eyebrow, SerifTitle, urgency } from "./kit";
+
+export type SheetTab = "why" | "timeline" | "graph";
+
+export interface DrawerState {
+  trace: Trace | null;
+  answer: { text: string; by: string; question: string } | null;
+  loading: boolean;
+  tab: SheetTab;
+}
 
 const COLS: { label: string; title: string }[] = [
   { label: "Message", title: "Messages" },
   { label: "Request", title: "Requests" },
   { label: "Agent", title: "Agents" },
-  { label: "Team", title: "Teams and deliveries" },
+  { label: "Team", title: "Team · delivery" },
   { label: "Lesson", title: "Lessons" },
 ];
 
@@ -17,30 +34,28 @@ function colOf(n: TraceNode) {
 }
 
 /** The household's memory as columns: what was said, what it became, who handled it, who went, what was learned. */
-function PathGraph({ trace }: { trace: Trace }) {
+export function PathGraph({ trace, labels = false }: { trace: Trace; labels?: boolean }) {
   const layout = useMemo(() => {
-    const W = 560;
+    const W = 472;
     const colW = W / COLS.length;
-    const rowH = 30;
+    const rowH = labels ? 40 : 30;
     const buckets: TraceNode[][] = COLS.map(() => []);
     const fam = trace.graph.nodes.find((n) => n.label === "Family");
     for (const n of trace.graph.nodes) if (n !== fam) buckets[colOf(n)].push(n);
     const rows = Math.max(...buckets.map((b) => b.length), 1) + (fam ? 1 : 0);
     const pos = new Map<string, { x: number; y: number }>();
-    buckets.forEach((b, ci) =>
-      b.forEach((n, ri) => pos.set(n.id, { x: ci * colW + colW / 2, y: 40 + ri * rowH })),
-    );
-    const H = 40 + rows * rowH + 10;
-    if (fam) pos.set(fam.id, { x: colW * 1.5, y: H - 26 });
-    return { W, H, colW, pos, fam };
-  }, [trace]);
+    buckets.forEach((b, ci) => b.forEach((n, ri) => pos.set(n.id, { x: ci * colW + colW / 2, y: 40 + ri * rowH })));
+    const H = 40 + rows * rowH + 14;
+    if (fam) pos.set(fam.id, { x: W / 2, y: H - 22 });
+    return { W, H, colW, pos };
+  }, [trace, labels]);
 
   const { W, H, colW, pos } = layout;
-  const boxW = colW - 12;
+  const boxW = colW - 10;
   return (
-    <svg className="pathgraph" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Graph of this household's memory">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-xl bg-muted" role="img" aria-label="Graph of this household's memory">
       {COLS.map((c, i) => (
-        <text key={c.label} className="col-label" x={i * colW + colW / 2} y={18} textAnchor="middle">
+        <text key={c.label} x={i * colW + colW / 2} y={20} textAnchor="middle" className="fill-muted-foreground font-mono text-[8px] uppercase">
           {c.title}
         </text>
       ))}
@@ -49,19 +64,60 @@ function PathGraph({ trace }: { trace: Trace }) {
         const b = pos.get(e.to);
         if (!a || !b) return null;
         const mx = (a.x + b.x) / 2;
-        return <path key={i} className={`e-${e.type}`} d={`M${a.x},${a.y} C${mx},${a.y} ${mx},${b.y} ${b.x},${b.y}`} />;
+        return (
+          <path
+            key={i}
+            d={`M${a.x},${a.y} C${mx},${a.y} ${mx},${b.y} ${b.x},${b.y}`}
+            fill="none"
+            stroke="var(--primary)"
+            strokeOpacity={0.45}
+            strokeWidth={1.2}
+          />
+        );
       })}
+      {labels &&
+        trace.graph.edges.map((e, i) => {
+          const a = pos.get(e.from);
+          const b = pos.get(e.to);
+          if (!a || !b) return null;
+          // Between the columns, pulled toward the target row, so labels of edges that leave one node spread out.
+          const x = (a.x + b.x) / 2;
+          const y = a.y + (b.y - a.y) * 0.8;
+          const w = e.type.length * 4.6 + 8;
+          return (
+            <g key={`l${i}`}>
+              <rect x={x - w / 2} y={y - 6} width={w} height={12} rx={3} fill="var(--background)" />
+              <text x={x} y={y + 3} textAnchor="middle" className="fill-primary font-mono text-[7.5px] font-semibold">
+                {e.type}
+              </text>
+            </g>
+          );
+        })}
       {trace.graph.nodes.map((n) => {
         const p = pos.get(n.id);
         if (!p) return null;
-        const w = n.label === "Family" ? colW * 1.6 : boxW;
-        const text = n.label === "Lesson" ? n.title.slice(0, 18) + "…" : n.title;
+        const isFam = n.label === "Family";
+        const w = isFam ? 150 : boxW;
+        const text = n.label === "Lesson" ? n.title.slice(0, 14) + "…" : n.title;
         return (
-          <g key={n.id} className={`n-${n.label}`}>
+          <g key={n.id}>
             <title>{n.label === "Message" ? n.text : n.title}</title>
-            <rect x={p.x - w / 2} y={p.y - 11} width={w} height={22} rx={4} />
-            <text x={p.x} y={p.y + 4} textAnchor="middle">
-              {n.label === "Family" ? `Household ${text}` : text}
+            <rect
+              x={p.x - w / 2}
+              y={p.y - 11}
+              width={w}
+              height={22}
+              rx={n.label === "Agent" ? 11 : 5}
+              fill={isFam ? "var(--foreground)" : n.label === "Request" ? "var(--info-soft)" : "var(--background)"}
+              stroke={isFam ? "none" : "var(--border)"}
+            />
+            <text
+              x={p.x}
+              y={p.y + 3.5}
+              textAnchor="middle"
+              className={cn("font-mono text-[9px] font-semibold", isFam ? "fill-background" : n.label === "Request" ? "fill-info" : "fill-foreground")}
+            >
+              {isFam ? `${n.id} · ${text}` : text}
             </text>
           </g>
         );
@@ -70,109 +126,220 @@ function PathGraph({ trace }: { trace: Trace }) {
   );
 }
 
+function QueryTab({ trace }: { trace: Trace }) {
+  const id = trace.family.id;
+  const counts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of trace.graph.edges) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [trace]);
+  const lines: [string, string][] = [
+    [`MATCH (r:Request)-[:FOR]->(:Family {id:'${id}'})`, "text-white"],
+    ["OPTIONAL MATCH (m:Message)-[:BECAME]->(r)", "text-white"],
+    ["RETURN r.id, r.status, r.priority, m.id, m.text", "text-rain"],
+    [" ", ""],
+    ["MATCH (r:Request)-[p:PROCESSED_BY]->(a:Agent)", "text-white"],
+    ["WHERE r.id IN $ids", "text-white"],
+    ["RETURN r.id, a.name, p.at, p.action, p.reason", "text-rain"],
+    ["// + DUPLICATE_OF · ASSIGNED_TO · HANDED_OFF", "text-[#7f8c92]"],
+    ["//   REROUTED · USED_LESSON · MADE → SERVED", "text-[#7f8c92]"],
+  ];
+  return (
+    <div className="flex flex-col gap-5">
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <Eyebrow className="text-foreground">Query that built the answer</Eyebrow>
+          <span className="num text-[10px] text-muted-foreground">memory.household_history() · read-only</span>
+        </div>
+        <pre className="num overflow-x-auto rounded-xl bg-slate px-4 py-3 text-[10.5px] leading-relaxed">
+          {lines.map(([l, c], i) => (
+            <div key={i} className={c}>
+              {l}
+            </div>
+          ))}
+        </pre>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">{trace.graph.nodes.length} nodes</span>
+          {counts.map(([t, n]) => (
+            <span key={t} className="num rounded-full bg-muted px-2 py-0.5 text-[10px]">
+              {n} {t}
+            </span>
+          ))}
+        </div>
+      </section>
+      <section className="flex flex-col gap-2">
+        <SerifTitle as="h3" sans="Path with" serif="edge labels" className="text-[15px] font-medium" />
+        <PathGraph trace={trace} labels />
+      </section>
+    </div>
+  );
+}
+
 interface Props {
-  trace: Trace | null;
-  answer: { text: string; by: string; question: string } | null;
-  loading: boolean;
+  state: DrawerState;
+  onTab: (t: SheetTab) => void;
+  onAsk: (question: string) => void;
   onClose: () => void;
   onShowRoute: (requestId: string) => void;
 }
 
-export function FamilyDrawer({ trace, answer, loading, onClose, onShowRoute }: Props) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
+export function FamilyDrawer({ state, onTab, onAsk, onClose, onShowRoute }: Props) {
+  const { trace, answer, loading, tab } = state;
+  const [follow, setFollow] = useState("");
   const f = trace?.family;
   const title = answer && !trace ? "No household found" : f ? (f.name as string) || f.id : "Looking it up…";
+  const prio = trace?.current?.priority ?? null;
+  const u = urgency(prio);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const q = follow.trim();
+    if (!q) return;
+    setFollow("");
+    onAsk(q);
+  };
+
   return (
-    <>
-      <div className="scrim" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="drawer-head">
-          <div>
-            <h2>{title}</h2>
-            {f && (
-              <div className="sub">
-                {f.id}, ward {String(f.ward)} {String(f.landmark || "")}{" "}
-                <span className={`chip s-${f.status}`}>{String(f.status).toLowerCase()}</span>
-              </div>
+    <Sheet open onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-[520px] sm:rounded-l-2xl">
+        <SheetHeader className="gap-1.5 border-b px-6 pt-5 pb-4">
+          <Eyebrow>{f ? `Household · ${f.id}` : "Household"}</Eyebrow>
+          <div className="flex flex-wrap items-center gap-2 pr-8">
+            <SheetTitle className="text-2xl font-medium tracking-tight">{title}</SheetTitle>
+            {f?.status && (
+              <Badge variant="outline" className="num uppercase">
+                {String(f.status)}
+              </Badge>
+            )}
+            {prio != null && (
+              <span className={cn("num inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10px] font-semibold", u.bg, u.text)}>
+                PRIORITY {prio}
+              </span>
             )}
           </div>
-          <button type="button" className="btn quiet" onClick={onClose} aria-label="Close">
-            Close
-          </button>
-        </div>
-        <div className="drawer-body">
-          {loading && <p>Reading this household's path through the graph…</p>}
-          {answer && (
-            <section>
-              <h3>{answer.question}</h3>
-              <div className="answer">
-                {answer.text}
-                <span className="by">
-                  {answer.by === "rules" ? "Read directly from the graph timeline" : `Written by ${answer.by} from the graph timeline`}
-                </span>
-              </div>
-            </section>
-          )}
           {f && (
-            <section className="facts" aria-label="Household facts">
-              <div>
-                <b className="num">{String(f.people)}</b>
-                <span>people</span>
-              </div>
-              <div>
-                <b className="num">{String(f.elderly ?? 0)}</b>
-                <span>elderly</span>
-              </div>
-              <div>
-                <b className="num">{String(f.children ?? 0)}</b>
-                <span>children</span>
-              </div>
-              <div>
-                <b className="num">{String(f.requests ?? 1)}</b>
-                <span>{Number(f.requests ?? 1) === 1 ? "message about them" : "messages, merged into one household"}</span>
-              </div>
-              <div style={{ gridColumn: "1 / -1" }}>
-                <b>{((f.needs as string[]) ?? []).map(needLabel).join(", ") || "none"}</b>
-                <span>needs</span>
-              </div>
-            </section>
+            <SheetDescription>
+              Ward {String(f.ward)} · {String(f.landmark || "")}
+            </SheetDescription>
           )}
-          {trace?.current?.status === "ASSIGNED" && (
-            <div>
-              <button type="button" className="btn" onClick={() => onShowRoute(trace.current!.id)}>
-                Show {trace.current.team}'s route on the chart
-              </button>
+        </SheetHeader>
+
+        <Tabs value={tab} onValueChange={(v) => onTab(v as SheetTab)} className="flex min-h-0 flex-1 gap-0">
+          <TabsList variant="line" className="h-10 w-full justify-start rounded-none border-b px-4">
+            <TabsTrigger value="why" className="flex-none px-3">
+              Why
+            </TabsTrigger>
+            <TabsTrigger value="timeline" className="flex-none px-3" disabled={!trace}>
+              Timeline
+              {trace && <span className="num rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground">{trace.timeline.length}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="graph" className="flex-none px-3" disabled={!trace}>
+              Graph query
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="why" className="min-h-0 overflow-y-auto px-6 py-5">
+            <div className="flex flex-col gap-5">
+              {loading && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner /> Reading this household's path through the graph…
+                </p>
+              )}
+              {answer && (
+                <section className="flex flex-col gap-2.5 rounded-xl bg-info-soft p-5">
+                  <Eyebrow className="text-info">You asked</Eyebrow>
+                  <p className="font-serif text-[22px] leading-tight italic">{answer.question}</p>
+                  <p className="text-sm leading-relaxed whitespace-pre-line">{answer.text}</p>
+                  <span className="eyebrow">
+                    [ {answer.by === "rules" ? "Read directly from the graph timeline" : `Written by ${answer.by} from the graph timeline`}
+                    {trace ? ` · ${trace.graph.edges.length} edges` : ""} ]
+                  </span>
+                </section>
+              )}
+              {f && (
+                <section className="grid grid-cols-4 rounded-xl border px-4" aria-label="Household facts">
+                  {(
+                    [
+                      [f.people, "people"],
+                      [f.elderly ?? 0, "elderly"],
+                      [f.children ?? 0, "children"],
+                      [f.requests ?? 1, Number(f.requests ?? 1) === 1 ? "message" : "messages, merged"],
+                    ] as [unknown, string][]
+                  ).map(([v, l]) => (
+                    <div key={l} className="flex flex-col gap-0.5 py-3">
+                      <b className="num text-[22px] font-semibold">{String(v)}</b>
+                      <span className="text-xs text-muted-foreground">{l}</span>
+                    </div>
+                  ))}
+                </section>
+              )}
+              {f && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="eyebrow">NEEDS</span>
+                    {((f.needs as string[]) ?? []).map((n) => (
+                      <Badge key={n} variant="secondary">
+                        {needLabel(n)}
+                      </Badge>
+                    ))}
+                    {!((f.needs as string[]) ?? []).length && <span className="text-sm text-muted-foreground">none</span>}
+                  </span>
+                  {trace?.current?.status === "ASSIGNED" && (
+                    <Button variant="outline" size="sm" onClick={() => onShowRoute(trace.current!.id)}>
+                      <RouteIcon data-icon="inline-start" />
+                      Show {trace.current.team}'s route
+                    </Button>
+                  )}
+                </div>
+              )}
+              {trace && (
+                <section className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <SerifTitle as="h3" sans="Path through" serif="shared memory" className="text-[15px] font-medium" />
+                    <span className="num text-[10px] text-muted-foreground">FALKORDB</span>
+                  </div>
+                  <PathGraph trace={trace} />
+                </section>
+              )}
             </div>
-          )}
-          {trace && (
-            <section>
-              <h3>Path through shared memory</h3>
-              <PathGraph trace={trace} />
-            </section>
-          )}
-          {trace && (
-            <section>
-              <h3>Timeline</h3>
-              <ol className="timeline">
+          </TabsContent>
+
+          <TabsContent value="timeline" className="min-h-0 overflow-y-auto px-6 py-5">
+            {trace && (
+              <ol className="flex flex-col">
                 {trace.timeline.map((s, i) => (
-                  <li key={i} className={`k-${s.kind}`}>
-                    <time className="num">{s.time}</time>
-                    <span className="pin" aria-hidden="true" />
-                    <span>
-                      <b>{s.who}</b> {s.what}
-                    </span>
+                  <li key={i} className="flex gap-3 border-b py-2.5 last:border-b-0">
+                    <time className="num w-12 shrink-0 text-[11px] text-muted-foreground">{s.time}</time>
+                    <span className="num w-24 shrink-0 text-[10px] font-semibold uppercase">{s.who}</span>
+                    <span className="text-[13px] leading-snug">{s.what}</span>
                   </li>
                 ))}
               </ol>
-            </section>
-          )}
-        </div>
-      </aside>
-    </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="graph" className="min-h-0 overflow-y-auto px-6 py-5">
+            {trace && <QueryTab trace={trace} />}
+          </TabsContent>
+        </Tabs>
+
+        <form className="flex items-center gap-2 border-t px-6 py-3.5" onSubmit={submit}>
+          <label htmlFor="follow" className="sr-only">
+            Ask a follow-up question
+          </label>
+          <input
+            id="follow"
+            value={follow}
+            onChange={(e) => setFollow(e.target.value)}
+            placeholder="Ask a follow-up: “Which team is closest if this one is delayed?”"
+            autoComplete="off"
+            className="h-9 min-w-0 flex-1 rounded-full border bg-background px-4 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+          <Button type="submit" disabled={!follow.trim()}>
+            <ArrowRightIcon data-icon="inline-start" />
+            Ask
+          </Button>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }

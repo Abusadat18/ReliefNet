@@ -1,17 +1,44 @@
 import { OrganizationSwitcher } from "@clerk/react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  ChevronDownIcon,
+  FileTextIcon,
+  MapPinIcon,
+  MessageSquarePlusIcon,
+  PlayIcon,
+  SparklesIcon,
+  UsersIcon,
+  XIcon,
+} from "lucide-react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
 import { ChartMap, type Flash } from "../components/ChartMap";
 import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialogs";
-import { FamilyDrawer } from "../components/FamilyDrawer";
-import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
+import { FamilyDrawer, type DrawerState, type SheetTab } from "../components/FamilyDrawer";
+import { BrandMark, Eyebrow, SerifTitle } from "../components/kit";
 import { LayersMenu, useMapLayers } from "../components/LayersMenu";
-import { TeamsDialog } from "../components/TeamsDialog";
+import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
 import { PlacesDialog } from "../components/PlacesDialog";
+import { TeamsDialog } from "../components/TeamsDialog";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { clock, useLiveEvents, useNow, useResource, useThrottled } from "../hooks";
 import type { AgentInfo, Lesson, LiveEvent, QueueItem, Region, Road, Snapshot, Stats, Trace } from "../types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 // deck.gl and the map code load only when the server has a Google Maps key.
 const GoogleMap = lazy(() => import("../components/GoogleMap").then((m) => ({ default: m.GoogleMap })));
@@ -25,6 +52,99 @@ const PIPELINE: { key: string; name: string }[] = [
   { key: "ASSIGNED", name: "Assigned" },
   { key: "DELIVERED", name: "Delivered" },
 ];
+
+const LEGEND_STORE = "reliefnet.legend";
+
+/** A floating card on the map. */
+function MapCard({ className, children, ...rest }: { className?: string; children: ReactNode } & HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("absolute rounded-xl border bg-background/95 shadow-sm backdrop-blur", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+function Swatch({ kind }: { kind: string }) {
+  const box = "grid w-6 shrink-0 place-items-center";
+  switch (kind) {
+    case "waiting":
+      return <span className={box}><span className="size-2.5 rounded-full" style={{ background: "var(--waiting)" }} /></span>;
+    case "assigned":
+      return <span className={box}><span className="size-2.5 rounded-full" style={{ background: "var(--route)" }} /></span>;
+    case "served":
+      return <span className={box}><span className="size-2.5 rounded-full border-2" style={{ borderColor: "var(--served)" }} /></span>;
+    case "priority":
+      return <span className={box}><span className="num rounded-full bg-critical px-1 text-[8px] leading-[14px] font-bold text-white">90</span></span>;
+    case "cluster":
+      return <span className={box}><span className="num grid size-3.5 place-items-center rounded-full bg-foreground text-[8px] font-bold text-background">3</span></span>;
+    case "team":
+      return <span className={box}><span className="h-3 w-5 rounded-full bg-foreground" /></span>;
+    case "shelter":
+      return <span className={box}><span className="size-3 rounded-full border bg-success-soft" style={{ borderColor: "var(--served)" }} /></span>;
+    case "route":
+      return <span className={box}><span className="h-1 w-5 rounded-full" style={{ background: "var(--route)" }} /></span>;
+    case "low":
+      return <span className={box}><span className="h-0.5 w-5" style={{ background: "var(--water-ink)" }} /></span>;
+    case "flooded":
+      return <span className={box}><span className="h-1 w-5 rounded-full" style={{ background: "var(--hazard)" }} /></span>;
+    case "reported":
+      return <span className={box}><span className="h-0 w-5 border-t-[3px] border-dashed" style={{ borderColor: "var(--waiting)" }} /></span>;
+    default:
+      return <span className={box}><span className="h-3 w-5 rounded border border-primary" style={{ background: "var(--mask)" }} /></span>;
+  }
+}
+
+const LEGEND: [string, string][] = [
+  ["waiting", "Waiting for help"],
+  ["assigned", "Team on the way"],
+  ["served", "Served"],
+  ["priority", "Priority 70 or more"],
+  ["cluster", "Several households"],
+  ["team", "Team"],
+  ["shelter", "Shelter"],
+  ["route", "Selected route"],
+  ["low", "Low road near a drain"],
+  ["flooded", "Flooded road"],
+  ["reported", "Reported, not confirmed"],
+  ["outside", "Outside the operation"],
+];
+
+function Legend() {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(LEGEND_STORE) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () =>
+    setOpen((o) => {
+      try {
+        localStorage.setItem(LEGEND_STORE, o ? "closed" : "open");
+      } catch {
+        /* not kept in private mode */
+      }
+      return !o;
+    });
+  return (
+    <MapCard className="top-4 left-4 w-52 p-3" aria-label="Legend">
+      <button type="button" className="flex w-full items-center justify-between" onClick={toggle} aria-expanded={open}>
+        <Eyebrow className="text-foreground">Legend</Eyebrow>
+        <ChevronDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {LEGEND.map(([k, label]) => (
+            <li key={k} className="flex items-center gap-2 text-xs">
+              <Swatch kind={k} />
+              {label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </MapCard>
+  );
+}
 
 export function Ops() {
   const { me, config, signOut, mode } = useSession();
@@ -40,7 +160,7 @@ export function Ops() {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [flashes, setFlashes] = useState<Flash[]>([]);
 
-  const [drawer, setDrawer] = useState<{ trace: Trace | null; answer: { text: string; by: string; question: string } | null; loading: boolean } | null>(null);
+  const [drawer, setDrawer] = useState<DrawerState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
@@ -98,29 +218,32 @@ export function Ops() {
   );
   const connected = useLiveEvents(onEvent);
 
-  const openFamily = useCallback(async (id: string) => {
+  const openFamily = useCallback(async (id: string, tab: SheetTab = "why") => {
     setSelected(id);
-    setDrawer({ trace: null, answer: null, loading: true });
+    setDrawer({ trace: null, answer: null, loading: true, tab });
     try {
       const trace = await api.get<Trace>(`/api/ops/family/${encodeURIComponent(id)}`);
-      setDrawer({ trace, answer: null, loading: false });
+      setDrawer({ trace, answer: null, loading: false, tab });
     } catch (e) {
-      setDrawer({ trace: null, answer: { text: e instanceof Error ? e.message : String(e), by: "rules", question: id }, loading: false });
+      setDrawer({ trace: null, answer: { text: e instanceof Error ? e.message : String(e), by: "rules", question: id }, loading: false, tab });
     }
   }, []);
 
-  const ask = async (ev: FormEvent) => {
-    ev.preventDefault();
-    const q = question.trim();
-    if (!q) return;
-    setDrawer({ trace: null, answer: null, loading: true });
+  const askWhy = useCallback(async (q: string) => {
+    setDrawer({ trace: null, answer: null, loading: true, tab: "why" });
     try {
       const r = await api.post<{ answer: string; trace: Trace | null; by: string }>("/api/ops/why", { question: q });
-      setDrawer({ trace: r.trace, answer: { text: r.answer, by: r.by, question: q }, loading: false });
+      setDrawer({ trace: r.trace, answer: { text: r.answer, by: r.by, question: q }, loading: false, tab: "why" });
       if (r.trace) setSelected(r.trace.family.id);
     } catch (e) {
-      setDrawer({ trace: null, answer: { text: e instanceof Error ? e.message : String(e), by: "rules", question: q }, loading: false });
+      setDrawer({ trace: null, answer: { text: e instanceof Error ? e.message : String(e), by: "rules", question: q }, loading: false, tab: "why" });
     }
+  }, []);
+
+  const ask = (ev: FormEvent) => {
+    ev.preventDefault();
+    const q = question.trim();
+    if (q) void askWhy(q);
   };
 
   const setRoad = async (status: "flooded" | "open") => {
@@ -153,7 +276,7 @@ export function Ops() {
       // Keep the whole card (about 260 px tall) above the question bar.
       setRoadPop({
         road,
-        x: Math.max(8, Math.min(at.x - box.left + 12, box.width - 256)),
+        x: Math.max(8, Math.min(at.x - box.left + 12, box.width - 296)),
         y: Math.max(8, Math.min(at.y - box.top + 12, box.height - 340)),
       });
     },
@@ -164,242 +287,283 @@ export function Ops() {
   const totalFam = (fam.SERVED ?? 0) + (fam.ASSIGNED ?? 0) + (fam.UNSERVED ?? 0);
   const deadAgents = (agents.data ?? []).filter((a) => a.state === "dead").length;
   const queueCount = (queue.data?.items ?? []).filter((q) => q.status !== "ASSIGNED").length;
+  const areaTitle = config?.area.title ?? region.data?.area?.title ?? "";
+
+  const figures: [string, ReactNode, boolean?][] = [
+    ["Households reached", `${fam.SERVED ?? 0} / ${totalFam}`],
+    ["Households sent two teams", s?.duplicate_dispatches ?? 0, s?.duplicate_dispatches === 0],
+    ["Duplicate messages merged", s?.metrics.merged ?? 0],
+    ["Messages, last minute", Math.round(s?.rates.messages_per_min ?? 0)],
+    ["Reclaimed after a crash", s?.metrics.reclaimed ?? 0],
+    ["Routes changed by floods", s?.metrics.rerouted ?? 0],
+    ...(s?.dedupe.precision != null ? ([["Merge accuracy (drill)", `${Math.round(s.dedupe.precision * 100)}%`]] as [string, ReactNode][]) : []),
+    ["Lessons in use", s?.lessons_active ?? 0],
+  ];
 
   return (
-    <div className="ops">
-      <header className="ops-head">
-        <div className="brand">
-          <b>ReliefNet</b>
-          <span>
-            {me?.org_name}, {clock(now)}
-          </span>
+    <div className="flex h-dvh flex-col bg-background text-foreground">
+      <header className="flex h-14 shrink-0 items-stretch border-b">
+        <div className="flex w-[300px] shrink-0 items-center gap-3 border-r px-5">
+          <BrandMark />
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="font-display text-[15px] font-semibold tracking-tight">ReliefNet</span>
+            <span className="num truncate text-[10px] text-muted-foreground">
+              {me?.org_name} · {clock(now)}
+            </span>
+          </div>
         </div>
-        <nav className="pipeline" aria-label="Requests at each stage">
-          {PIPELINE.map((p) => (
-            <div
-              key={p.key}
-              className={`station${p.key === "TRIAGED" && (s?.requests.TRIAGED ?? 0) > 5 ? " hot" : ""}${p.key === "DELIVERED" ? " done" : ""}`}
-            >
-              <span className="count num">{s?.requests[p.key] ?? 0}</span>
-              <span className="name">{p.name}</span>
-            </div>
-          ))}
-          <div className="station aside">
-            <span className="count num">{s?.requests.MERGED ?? 0}</span>
-            <span className="name">Duplicates merged</span>
+        <nav className="flex min-w-0 flex-1 items-stretch overflow-x-auto" aria-label="Requests at each stage">
+          {PIPELINE.map((p, i) => {
+            const hot = p.key === "TRIAGED" && (s?.requests.TRIAGED ?? 0) > 5;
+            const done = p.key === "DELIVERED";
+            return (
+              <div key={p.key} className={cn("flex items-center gap-2.5 border-r px-4", hot && "bg-high-soft")}>
+                <span className="num text-[10px] text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
+                <span className="flex flex-col leading-tight">
+                  <span className={cn("num text-[10px] tracking-wide uppercase", hot ? "text-high" : "text-muted-foreground")}>{p.name}</span>
+                  <span className={cn("num text-[17px] font-semibold", hot && "text-high", done && "text-success")}>
+                    {s?.requests[p.key] ?? 0}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-2 px-4 text-[13px] whitespace-nowrap text-muted-foreground">
+            <span className="num font-semibold text-foreground">{s?.requests.MERGED ?? 0}</span> duplicates merged
           </div>
         </nav>
-        <div className="head-tools">
-          <span className={`live-dot${connected ? " on" : ""}`}>{connected ? "Live" : "Reconnecting"}</span>
+        <div className="flex shrink-0 items-center gap-2.5 px-4">
+          <span
+            className={cn(
+              "num inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[10px] font-semibold",
+              !connected && "text-warning",
+            )}
+            role="status"
+          >
+            <span className={cn("size-1.5 rounded-full", connected ? "bg-success" : "bg-warning")} aria-hidden="true" />
+            {connected ? "LIVE" : "RECONNECTING"}
+          </span>
           {mode === "clerk" && (
             // Admins invite and manage members from here (Manage organization > Members).
             // A full page load after switching makes every panel reload for the new org.
-            <OrganizationSwitcher
-              hidePersonal
-              afterSelectOrganizationUrl="/"
-              afterLeaveOrganizationUrl="/"
-              afterCreateOrganizationUrl="/"
-            />
+            <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl="/" afterLeaveOrganizationUrl="/" afterCreateOrganizationUrl="/" />
           )}
           <ThemeToggle />
-          <button type="button" className="btn quiet small" onClick={signOut} title={`Signed in as ${me?.name}`}>
+          <Button variant="ghost" size="sm" onClick={signOut} title={`Signed in as ${me?.name}`}>
             Sign out
-          </button>
+          </Button>
         </div>
       </header>
 
-      <div className="ops-body">
-        <div className="chart-wrap" ref={wrapRef}>
-          {mergedRegion ? (
-            config?.google_maps && !mapFailed ? (
-              <Suspense fallback={<p className="empty">Loading the map…</p>}>
-                <GoogleMap
-                  apiKey={config.google_maps.api_key}
-                  mapId={config.google_maps.map_id}
-                  mapIdDetailed={config.google_maps.map_id_detailed ?? null}
-                  onFail={setMapFailed}
-                  {...mapProps(mergedRegion)}
-                />
-              </Suspense>
-            ) : (
-              <ChartMap {...mapProps(mergedRegion)} />
-            )
-          ) : (
-            <p className="empty">{region.error ?? "Loading the chart…"}</p>
-          )}
-          {mapFailed && (
-            <p className="map-note" role="status">
-              {mapFailed}
-            </p>
-          )}
-
-          <div className="legend" aria-label="Legend">
-            <span>
-              <i style={{ background: "var(--waiting)" }} /> Waiting for help
-            </span>
-            <span>
-              <i style={{ background: "var(--route)" }} /> Team on the way
-            </span>
-            <span>
-              <i style={{ background: "var(--paper)", border: "2px solid var(--served)" }} /> Served
-            </span>
-            <span>
-              <i style={{ border: "2px solid var(--hazard)" }} /> Priority 70 or more
-            </span>
-            <span>
-              <i className="line" style={{ borderColor: "var(--hazard)" }} /> Flooded road
-            </span>
-            <span>
-              <i className="line" style={{ borderColor: "var(--waiting)", borderTopStyle: "dashed" }} /> Reported, not confirmed
-            </span>
-            <span>
-              <i className="line" style={{ borderColor: "var(--water-ink)", borderTopStyle: "dotted" }} /> Low road near a drain
-            </span>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col border-r">
+          <div className="flex h-13 shrink-0 items-center justify-between gap-4 border-b pr-4 pl-5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <SerifTitle as="h1" sans={areaTitle} serif="flood operation" className="truncate text-[17px]" />
+              <Badge variant="outline" className="hidden xl:inline-flex">
+                OpenStreetMap roads
+              </Badge>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setTeamsDialog("list")}>
+                <UsersIcon data-icon="inline-start" />
+                Teams
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setPlacesOpen(true)}>
+                <MapPinIcon data-icon="inline-start" />
+                Places
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setDialog("message")}>
+                <MessageSquarePlusIcon data-icon="inline-start" />
+                Add message
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setDialog("brief")}>
+                <FileTextIcon data-icon="inline-start" />
+                Shift handover
+              </Button>
+              <Button size="sm" onClick={() => setDialog("drill")}>
+                <PlayIcon data-icon="inline-start" />
+                Flood drill
+              </Button>
+            </div>
           </div>
 
-          {mergedRegion && <LayersMenu visible={layers} onChange={setLayer} />}
-
-          <div className="chart-tools">
-            <button type="button" className="btn" onClick={() => setTeamsDialog("list")}>
-              Teams
-            </button>
-            <button type="button" className="btn" onClick={() => setPlacesOpen(true)}>
-              Places
-            </button>
-            <button type="button" className="btn" onClick={() => setDialog("message")}>
-              Add message
-            </button>
-            <button type="button" className="btn" onClick={() => setDialog("brief")}>
-              Shift handover
-            </button>
-            <button type="button" className="btn primary" onClick={() => setDialog("drill")}>
-              Flood drill
-            </button>
-          </div>
-
-          {snapshot.data && snapshot.data.teams.length === 0 && (
-            <div className="team-empty" role="status">
-              <h3>No teams yet. Add your first team.</h3>
-              <p>Dispatch cannot send help without a team. Requests wait in Triaged until a team is on duty.</p>
-              {me?.role === "admin" ? (
-                <button type="button" className="btn primary" onClick={() => setTeamsDialog("add")}>
-                  Add a team
-                </button>
+          <div className="relative min-h-0 flex-1 overflow-hidden" ref={wrapRef} style={{ background: "var(--land)" }}>
+            {mergedRegion ? (
+              config?.google_maps && !mapFailed ? (
+                <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading the map…</p>}>
+                  <GoogleMap
+                    apiKey={config.google_maps.api_key}
+                    mapId={config.google_maps.map_id}
+                    mapIdDetailed={config.google_maps.map_id_detailed ?? null}
+                    onFail={setMapFailed}
+                    {...mapProps(mergedRegion)}
+                  />
+                </Suspense>
               ) : (
-                <p>Ask an admin of your organisation to add a team.</p>
-              )}
-            </div>
-          )}
-
-          <section className="cartouche" aria-label="Operation figures">
-            <h2>{config?.area.title ?? region.data?.area?.title} flood operation</h2>
-            <dl>
-              <dt>Households reached</dt>
-              <dd className="num">
-                {fam.SERVED ?? 0} of {totalFam}
-              </dd>
-              <dt>Households sent two teams</dt>
-              <dd className={`num${s && s.duplicate_dispatches === 0 ? " zero" : ""}`}>{s?.duplicate_dispatches ?? 0}</dd>
-              <dt>Duplicate messages merged</dt>
-              <dd className="num">{s?.metrics.merged ?? 0}</dd>
-              <dt>Messages in the last minute</dt>
-              <dd className="num">{Math.round(s?.rates.messages_per_min ?? 0)}</dd>
-              <dt>Requests reclaimed after a crash</dt>
-              <dd className="num">{s?.metrics.reclaimed ?? 0}</dd>
-              <dt>Routes changed by floods</dt>
-              <dd className="num">{s?.metrics.rerouted ?? 0}</dd>
-              {s?.dedupe.precision != null && (
-                <>
-                  <dt>Merge accuracy (drill)</dt>
-                  <dd className="num">{Math.round(s.dedupe.precision * 100)}%</dd>
-                </>
-              )}
-              <dt>Lessons in use</dt>
-              <dd className="num">{s?.lessons_active ?? 0}</dd>
-            </dl>
-            <p className="foot">
-              Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
-              Memory: FalkorDB graph {me ? `org_${me.org}` : ""}.
-              {region.data?.area?.attribution && <> {region.data.area.attribution}.</>}
-            </p>
-          </section>
-
-          <form className="askbar" onSubmit={ask} role="search">
-            <label htmlFor="ask" className="sr-only">
-              Ask about a household
-            </label>
-            <input
-              id="ask"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Ask why: “Why hasn't the Das family been served?”"
-              autoComplete="off"
-            />
-            <button type="submit" className="btn primary" disabled={!question.trim()}>
-              Ask
-            </button>
-          </form>
-
-          {roadPop && (
-            <div className="road-pop" style={{ left: roadPop.x, top: roadPop.y }} role="dialog" aria-label={roadPop.road.name}>
-              <h3>{roadPop.road.name}</h3>
-              <span className={`chip s-${roadPop.road.status}`}>{roadPop.road.status}</span>
-              <p className="result-line">
-                Your report counts as confirmed, so it changes routes for every organisation right away.
+                <ChartMap {...mapProps(mergedRegion)} />
+              )
+            ) : (
+              <p className="p-6 text-sm text-muted-foreground">{region.error ?? "Loading the chart…"}</p>
+            )}
+            {mapFailed && (
+              <p
+                className="absolute bottom-24 left-1/2 max-w-[min(520px,calc(100%-32px))] -translate-x-1/2 rounded-lg border border-warning bg-high-soft px-3 py-2 text-xs"
+                role="status"
+              >
+                {mapFailed}
               </p>
-              <div className="row" style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn small hazard" onClick={() => setRoad("flooded")}>
-                  Mark flooded
-                </button>
-                <button type="button" className="btn small" onClick={() => setRoad("open")}>
-                  Mark open
-                </button>
-                <button type="button" className="btn small quiet" onClick={() => setRoadPop(null)}>
-                  Close
-                </button>
+            )}
+
+            <Legend />
+
+            {mergedRegion && (
+              <div className="absolute top-4 right-16 z-10">
+                <LayersMenu visible={layers} onChange={setLayer} />
               </div>
-              {roadMsg && <p className="result-line">{roadMsg}</p>}
-            </div>
-          )}
+            )}
+
+            {snapshot.data && snapshot.data.teams.length === 0 && (
+              <MapCard className="top-1/2 left-1/2 w-[min(380px,calc(100%-32px))] -translate-x-1/2 -translate-y-1/2 p-5" role="status">
+                <h3 className="font-medium">No teams yet. Add your first team.</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Dispatch cannot send help without a team. Requests wait in Triaged until a team is on duty.
+                </p>
+                <div className="mt-3">
+                  {me?.role === "admin" ? (
+                    <Button onClick={() => setTeamsDialog("add")}>Add a team</Button>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Ask an admin of your organisation to add a team.</p>
+                  )}
+                </div>
+              </MapCard>
+            )}
+
+            <MapCard className="bottom-4 left-4 w-[290px] px-4 pt-3.5 pb-2.5" aria-label="Operation figures">
+              <Eyebrow className="text-foreground">Shift status · live</Eyebrow>
+              <dl className="mt-1">
+                {figures.map(([label, value, zero]) => (
+                  <div key={label} className="flex items-end justify-between border-b py-1.5 last:border-b-0">
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className={cn("num text-sm font-semibold", zero && "text-success")}>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="num mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
+                Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
+                Memory: FalkorDB org_{me?.org}. {region.data?.area?.attribution}
+              </p>
+            </MapCard>
+
+            <form
+              className="absolute bottom-4 left-[322px] right-4 mx-auto flex h-12 max-w-[600px] items-center gap-2.5 rounded-full border bg-background pr-1.5 pl-4 shadow-md"
+              onSubmit={ask}
+              role="search"
+            >
+              <SparklesIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <label htmlFor="ask" className="sr-only">
+                Ask about a household
+              </label>
+              <input
+                id="ask"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder="Ask why: “Why hasn't the Das family been served?”"
+                autoComplete="off"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <Kbd className="hidden sm:inline-flex">Enter</Kbd>
+              <Button type="submit" disabled={!question.trim()}>
+                Ask
+              </Button>
+            </form>
+
+            {roadPop && (
+              <MapCard className="z-20 w-[280px] p-4" style={{ left: roadPop.x, top: roadPop.y }} role="dialog" aria-label={roadPop.road.name}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-medium">{roadPop.road.name}</h3>
+                    <Badge variant={roadPop.road.status === "flooded" ? "destructive" : "outline"} className="num mt-1 uppercase">
+                      {roadPop.road.status}
+                    </Badge>
+                  </div>
+                  <Button variant="ghost" size="icon-sm" onClick={() => setRoadPop(null)} aria-label="Close">
+                    <XIcon />
+                  </Button>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Your report counts as confirmed, so it changes routes for every organisation right away.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Button variant="destructive" size="sm" onClick={() => setRoad("flooded")}>
+                    Mark flooded
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setRoad("open")}>
+                    Mark open
+                  </Button>
+                </div>
+                {roadMsg && <p className="mt-2 text-xs text-muted-foreground">{roadMsg}</p>}
+              </MapCard>
+            )}
+          </div>
         </div>
 
-        <aside className="side">
-          <div className="tabs" role="tablist">
-            {(
-              [
-                ["queue", "Queue", queueCount],
-                ["feed", "Live log", null],
-                ["agents", "Agents", deadAgents ? `${deadAgents} down` : null],
-                ["lessons", "Lessons", lessons.data?.length || null],
-              ] as [Tab, string, number | string | null][]
-            ).map(([k, label, badge]) => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-                {label}
-                {badge !== null && badge !== 0 && <span className="badge">{badge}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="panel-scroll" role="tabpanel">
-            {tab === "queue" && <QueuePanel items={queue.data?.items ?? []} onOpen={openFamily} />}
-            {tab === "feed" && <FeedPanel events={events} onOpen={openFamily} />}
-            {tab === "agents" && <AgentsPanel agents={agents.data ?? []} onChange={() => void agents.reload()} />}
-            {tab === "lessons" && (
+        <aside className="flex w-[420px] shrink-0 flex-col">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="flex min-h-0 flex-1 gap-0">
+            <TabsList variant="line" className="h-10 w-full justify-start rounded-none border-b px-2">
+              {(
+                [
+                  ["queue", "Queue", queueCount || null, false],
+                  ["feed", "Live log", null, false],
+                  ["agents", "Agents", deadAgents ? `${deadAgents} down` : null, deadAgents > 0],
+                  ["lessons", "Lessons", lessons.data?.length || null, false],
+                ] as [Tab, string, number | string | null, boolean][]
+              ).map(([k, label, badge, bad]) => (
+                <TabsTrigger key={k} value={k} className="flex-none px-3">
+                  {label}
+                  {badge !== null && (
+                    <span
+                      className={cn(
+                        "num rounded px-1 text-[10px] leading-4 font-semibold",
+                        bad ? "bg-destructive text-white" : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <TabsContent value="queue" className="min-h-0 overflow-y-auto">
+              <QueuePanel items={queue.data?.items ?? []} onOpen={openFamily} />
+            </TabsContent>
+            <TabsContent value="feed" className="min-h-0 overflow-y-auto">
+              <FeedPanel events={events} onOpen={openFamily} />
+            </TabsContent>
+            <TabsContent value="agents" className="min-h-0 overflow-y-auto">
+              <AgentsPanel agents={agents.data ?? []} queue={queue.data?.items ?? []} onChange={() => void agents.reload()} />
+            </TabsContent>
+            <TabsContent value="lessons" className="min-h-0 overflow-y-auto">
               <LessonsPanel
                 lessons={lessons.data ?? []}
                 onLearn={async () => {
                   lessons.setData(await api.post<Lesson[]>("/api/ops/learn"));
                 }}
+                onOverride={async (key, override) => {
+                  lessons.setData(await api.post<Lesson[]>(`/api/ops/lessons/${encodeURIComponent(key)}/override`, { override }));
+                  void stats.reload();
+                }}
               />
-            )}
-          </div>
+            </TabsContent>
+          </Tabs>
         </aside>
       </div>
 
       {drawer && (
         <FamilyDrawer
-          trace={drawer.trace}
-          answer={drawer.answer}
-          loading={drawer.loading}
+          state={drawer}
+          onTab={(t) => setDrawer((d) => (d ? { ...d, tab: t } : d))}
+          onAsk={(q) => void askWhy(q)}
           onClose={() => {
             setDrawer(null);
             setSelected(null);

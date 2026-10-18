@@ -1,22 +1,150 @@
-import { useState } from "react";
+import {
+  ArrowUpWideNarrowIcon,
+  CopyIcon,
+  FileTextIcon,
+  GitBranchIcon,
+  InboxIcon,
+  KeyRoundIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  RouteIcon,
+  SquareIcon,
+  UsersIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { ago, clock, needLabel, useNow } from "../hooks";
-import type { AgentInfo, Lesson, LiveEvent, QueueItem } from "../types";
+import type { AgentInfo, Lesson, LiveEvent, QueueItem, Trace } from "../types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
+import { EDGE_FILTERS, graphWrite, queueReceipt, type Tone } from "./graph";
+import { Eyebrow, GraphReceipt, ScoreTile, SerifTitle } from "./kit";
 
-const STAGES: { status: string; title: string; note: string }[] = [
-  { status: "TRIAGED", title: "Waiting for a team", note: "Dispatch takes the highest priority first" },
-  { status: "ASSIGNED", title: "Team on the way", note: "" },
-  { status: "RESOLVED", title: "Being scored", note: "" },
-  { status: "NEW", title: "Checking for duplicates", note: "" },
+export type OpenFamily = (familyId: string, tab?: "why" | "timeline" | "graph") => void;
+
+const STAGES: { status: string; title: string }[] = [
+  { status: "TRIAGED", title: "Waiting for a team" },
+  { status: "ASSIGNED", title: "Team on the way" },
+  { status: "RESOLVED", title: "Being scored" },
+  { status: "NEW", title: "Checking for duplicates" },
 ];
 
-export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: (familyId: string) => void }) {
+function PanelEmpty({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
+  return (
+    <Empty className="m-4 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Icon />
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+}
+
+function StatusLine({ q, now }: { q: QueueItem; now: number }) {
+  const lease = q.claimed_by && q.lease_until && q.lease_until > now;
+  const expired = q.claimed_by && q.lease_until && q.lease_until <= now;
+  const [dot, text, cls] = lease
+    ? ["bg-info", `${q.claimed_by} holds the lease · ${Math.ceil((q.lease_until! - now) / 1000)} s left`, ""]
+    : expired
+      ? ["bg-warning", `Lease from ${q.claimed_by} expired · another agent can take it`, "text-warning"]
+      : q.blocked
+        ? ["bg-critical", q.blocked, "text-critical"]
+        : q.status === "ASSIGNED"
+          ? ["bg-primary", `${q.team ?? "Team"} · ETA ${q.eta} min`, ""]
+          : ["bg-warning", `Waiting ${ago(q.created_at, now).replace(" ago", "")}`, ""];
+  return (
+    <span className={cn("num flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground", cls)}>
+      <span className={cn("mt-[5px] size-1.5 shrink-0 rounded-full", dot)} aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
+
+/** The household's edges, read from the graph when a receipt opens. */
+function ReceiptDetail({ familyId, onOpen }: { familyId: string; onOpen: OpenFamily }) {
+  const [trace, setTrace] = useState<Trace | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api
+      .get<Trace>(`/api/ops/family/${encodeURIComponent(familyId)}`)
+      .then((t) => live && setTrace(t))
+      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      live = false;
+    };
+  }, [familyId]);
+  const title = (id: string) => trace?.graph.nodes.find((n) => n.id === id)?.title ?? id;
+  const cypher =
+    `MATCH (r:Request)-[:FOR]->(:Family {id:'${familyId}'})\n` +
+    "OPTIONAL MATCH (m:Message)-[:BECAME]->(r)\n" +
+    "OPTIONAL MATCH (r)-[p:PROCESSED_BY]->(a:Agent)\n" +
+    "RETURN r, m, p, a";
+  return (
+    <div className="mx-3.5 mt-2 overflow-hidden rounded-xl border bg-card">
+      {!trace && !error && (
+        <p className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground">
+          <Spinner /> Reading this household's edges…
+        </p>
+      )}
+      {error && <p className="px-3 py-2.5 text-xs text-destructive">{error}</p>}
+      {trace && (
+        <ol>
+          {trace.graph.edges.slice(0, 8).map((e, i) => (
+            <li key={i} className="flex gap-2.5 border-b px-3 py-1.5 last:border-b-0">
+              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-foreground/50" aria-hidden="true" />
+              <span className="num text-[10.5px] font-semibold break-all">
+                ({title(e.from)})-[:{e.type}]-&gt;({title(e.to)})
+              </span>
+            </li>
+          ))}
+          {trace.timeline.slice(-3).map((t, i) => (
+            <li key={`t${i}`} className="border-b px-3 py-1.5 text-[11.5px] leading-snug text-muted-foreground last:border-b-0">
+              <span className="num font-semibold text-foreground">{t.who}</span> {t.what}
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="flex items-center justify-between bg-muted px-3 py-1.5">
+        <span className="num text-[10px] text-muted-foreground">{trace ? `${trace.graph.edges.length} edges` : "FalkorDB"}</span>
+        <span className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              void navigator.clipboard?.writeText(cypher).then(() => setCopied(true));
+            }}
+          >
+            <CopyIcon data-icon="inline-start" />
+            {copied ? "Copied" : "Copy Cypher"}
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => onOpen(familyId, "graph")}>
+            <GitBranchIcon data-icon="inline-start" />
+            Open in graph
+          </Button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: OpenFamily }) {
   const now = useNow(1000);
+  const [openReceipt, setOpenReceipt] = useState<string | null>(null);
   if (!items.length)
     return (
-      <p className="empty">
-        No open requests. Start a flood drill, or paste a message from the helpline, to see the agents work.
-      </p>
+      <PanelEmpty icon={InboxIcon} title="No open requests">
+        Start a flood drill, or paste a message from the helpline, to see the agents work.
+      </PanelEmpty>
     );
   return (
     <div>
@@ -25,40 +153,48 @@ export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: (fam
         if (!rows.length) return null;
         return (
           <section key={st.status} aria-label={st.title}>
-            <div className="group-head">
-              <span>{st.title}</span>
-              <span className="num">{rows.length}</span>
+            <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background px-4 py-2">
+              <Eyebrow className="text-foreground">{st.title}</Eyebrow>
+              <span className="num text-[11px] text-muted-foreground">{rows.length}</span>
             </div>
             {rows.map((q) => {
-              const lease = q.claimed_by && q.lease_until && q.lease_until > now;
-              const expired = q.claimed_by && q.lease_until && q.lease_until <= now;
+              const r = queueReceipt(q);
+              const open = openReceipt === q.id;
               return (
-                <button key={q.id} type="button" className="qrow" onClick={() => q.family && onOpen(q.family)}>
-                  <span className={`prio num${(q.priority ?? 0) >= 70 ? " high" : ""}`}>{q.priority ?? "–"}</span>
-                  <span className="qwho">
-                    <span>{q.name || q.family || q.id}</span>
-                    <span className={`chip s-${q.status}`}>{q.team ?? q.id}</span>
-                  </span>
-                  <span className="what">
-                    Ward {q.ward} {q.landmark}. Needs {q.needs.map(needLabel).join(", ")}.
-                    {q.merged ? ` ${q.merged} duplicate message${q.merged > 1 ? "s" : ""} merged.` : ""}
-                  </span>
-                  {lease ? (
-                    <span className="lease">
-                      {q.claimed_by} holds the lease, {Math.ceil((q.lease_until! - now) / 1000)} s left
+                <div key={q.id} className={cn("border-b pb-3", open && "bg-info-soft")}>
+                  <button
+                    type="button"
+                    className="flex w-full gap-3 px-3.5 pt-3 text-left hover:bg-muted/50"
+                    onClick={() => q.family && onOpen(q.family)}
+                  >
+                    <ScoreTile priority={q.priority} />
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="flex items-baseline gap-2">
+                        <span className="truncate text-sm font-semibold">{q.name || q.family || q.id}</span>
+                        <span className="num text-[11px] text-muted-foreground">{q.id}</span>
+                      </span>
+                      <span className="text-[13px] text-muted-foreground">
+                        Ward {q.ward} · {q.landmark}
+                      </span>
+                      {q.needs.length > 0 && (
+                        <span className="flex flex-wrap gap-1">
+                          {q.needs.map((n) => (
+                            <Badge key={n} variant="secondary">
+                              {needLabel(n)}
+                            </Badge>
+                          ))}
+                        </span>
+                      )}
+                      <StatusLine q={q} now={now} />
                     </span>
-                  ) : expired ? (
-                    <span className="lease blocked">Lease from {q.claimed_by} expired. Another agent can take it.</span>
-                  ) : q.blocked ? (
-                    <span className="lease blocked">{q.blocked}</span>
-                  ) : q.status === "ASSIGNED" ? (
-                    <span className="lease">ETA {q.eta} min</span>
-                  ) : (
-                    <span className="lease" style={{ color: "var(--ink-3)" }}>
-                      Waiting {ago(q.created_at, now).replace(" ago", "")}
-                    </span>
+                  </button>
+                  {q.family && (
+                    <div className="mt-2 pl-[70px] pr-3.5">
+                      <GraphReceipt edge={r.edge} text={r.text} open={open} onClick={() => setOpenReceipt(open ? null : q.id)} />
+                    </div>
                   )}
-                </button>
+                  {open && q.family && <ReceiptDetail familyId={q.family} onOpen={onOpen} />}
+                </div>
               );
             })}
           </section>
@@ -68,48 +204,61 @@ export function QueuePanel({ items, onOpen }: { items: QueueItem[]; onOpen: (fam
   );
 }
 
-const FEED_FILTERS: { key: string; label: string; kinds: string[] | null }[] = [
-  { key: "all", label: "Everything", kinds: null },
-  { key: "decisions", label: "Decisions", kinds: ["merged", "triaged", "assigned", "rerouted", "unreachable"] },
-  { key: "field", label: "Field", kinds: ["delivered", "road", "road_report", "field_chat", "photo"] },
-  { key: "memory", label: "Memory", kinds: ["lesson", "briefing", "reclaimed", "agent_down", "agent_kill", "agent_revive"] },
-];
+const TONE: Record<Tone, { row: string; who: string }> = {
+  memory: { row: "bg-info-soft", who: "text-info" },
+  field: { row: "bg-success-soft", who: "text-success" },
+  lease: { row: "bg-high-soft", who: "text-warning" },
+  hazard: { row: "bg-critical-soft", who: "text-critical" },
+  plain: { row: "", who: "text-foreground" },
+};
 
-export function FeedPanel({ events, onOpen }: { events: LiveEvent[]; onOpen: (familyId: string) => void }) {
-  const [filter, setFilter] = useState("all");
-  const kinds = FEED_FILTERS.find((f) => f.key === filter)?.kinds;
-  const shown = events.filter((e) => !kinds || kinds.includes(e.kind)).slice(0, 250);
+export function FeedPanel({ events, onOpen }: { events: LiveEvent[]; onOpen: OpenFamily }) {
+  const [filter, setFilter] = useState<string>("all");
+  const rows = events
+    .map((e) => ({ e, w: graphWrite(e) }))
+    .filter(({ w }) => filter === "all" || w?.type === filter)
+    .slice(0, 250);
   return (
     <div>
-      <div className="feed-filter" role="group" aria-label="Filter the log">
-        {FEED_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={`btn small${filter === f.key ? " primary" : ""}`}
-            aria-pressed={filter === f.key}
-            onClick={() => setFilter(f.key)}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-2 border-b px-4 py-3">
+        <SerifTitle as="h3" sans="Writes to" serif="the graph" className="text-base font-medium" />
+        <p className="text-xs text-muted-foreground">
+          Every agent writes to FalkorDB, then publishes the event. Each row shows the edge it wrote.
+        </p>
+        <ToggleGroup
+          value={[filter]}
+          onValueChange={(v: string[]) => setFilter(v[0] ?? "all")}
+          variant="outline"
+          size="sm"
+          className="flex-wrap"
+          aria-label="Filter by edge type"
+        >
+          <ToggleGroupItem value="all" className="num rounded-full! text-[10px]">
+            All
+          </ToggleGroupItem>
+          {EDGE_FILTERS.map((t) => (
+            <ToggleGroupItem key={t} value={t} className="num rounded-full! text-[10px]">
+              {t}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
-      {shown.length ? (
-        <ol className="feed" aria-live="polite">
-          {shown.map((e, i) => {
+      {rows.length ? (
+        <ol aria-live="polite">
+          {rows.map(({ e, w }, i) => {
             const fam = (e.data?.family as string) || undefined;
+            const tone = TONE[w?.tone ?? "plain"];
             return (
-              <li key={`${e.at}-${i}`} className={`k-${e.kind}`}>
-                <time className="num">{clock(e.at)}</time>
-                <span>
-                  {e.text}
+              <li key={`${e.at}-${i}`} className={cn("flex gap-3 border-b px-4 py-2.5", tone.row)}>
+                <time className="num w-14 shrink-0 pt-px text-[10.5px] text-muted-foreground">{clock(e.at)}</time>
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  {w && <span className={cn("num text-[10.5px] font-semibold tracking-wide uppercase", tone.who)}>{w.who}</span>}
+                  {w && <span className="num text-[10.5px] font-semibold break-all text-foreground">{w.edge}</span>}
+                  <span className="text-xs leading-snug text-muted-foreground">{e.text}</span>
                   {fam && (
-                    <>
-                      {" "}
-                      <button type="button" className="btn quiet small" onClick={() => onOpen(fam)}>
-                        Open {fam}
-                      </button>
-                    </>
+                    <Button variant="link" size="xs" className="h-auto self-start p-0" onClick={() => onOpen(fam)}>
+                      Open {fam}
+                    </Button>
                   )}
                 </span>
               </li>
@@ -117,13 +266,23 @@ export function FeedPanel({ events, onOpen }: { events: LiveEvent[]; onOpen: (fa
           })}
         </ol>
       ) : (
-        <p className="empty">Nothing here yet. Events appear the moment an agent writes to the graph.</p>
+        <PanelEmpty icon={GitBranchIcon} title="Nothing here yet">
+          Events appear the moment an agent writes to the graph.
+        </PanelEmpty>
       )}
     </div>
   );
 }
 
-export function AgentsPanel({ agents, onChange }: { agents: AgentInfo[]; onChange: () => void }) {
+const STATE: Record<AgentInfo["state"], { dot: string; label: string; text: string }> = {
+  working: { dot: "bg-success", label: "WORKING", text: "text-success" },
+  idle: { dot: "bg-muted-foreground", label: "WAITING", text: "text-muted-foreground" },
+  stale: { dot: "bg-warning", label: "STALE", text: "text-warning" },
+  dead: { dot: "bg-destructive", label: "STOPPED", text: "text-destructive" },
+};
+
+export function AgentsPanel({ agents, queue, onChange }: { agents: AgentInfo[]; queue: QueueItem[]; onChange: () => void }) {
+  const now = useNow(1000);
   const [busy, setBusy] = useState<string | null>(null);
   const act = async (name: string, action: "kill" | "revive") => {
     setBusy(name);
@@ -136,103 +295,278 @@ export function AgentsPanel({ agents, onChange }: { agents: AgentInfo[]; onChang
   };
   if (!agents.length)
     return (
-      <p className="empty">
-        No agents are running. Start them with <code>python -m reliefnet.workers</code>.
-      </p>
+      <PanelEmpty icon={UsersIcon} title="No agents are running">
+        Start them with <code className="num">python -m reliefnet.workers</code>.
+      </PanelEmpty>
     );
   return (
     <div>
-      <p className="note">
-        Agents never message each other. Each one claims work in the graph with a lease that it must keep renewing.
-        Stop a Dispatch agent while it works: its lease runs out and another copy picks up the request.
-      </p>
-      {agents.map((a) => (
-        <div key={a.name} className={`agent-row ${a.state}`}>
-          <span className="nm">{a.name}</span>
-          {a.state === "dead" ? (
-            <button type="button" className="btn small" disabled={busy === a.name} onClick={() => act(a.name, "revive")}>
-              Restart
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn small hazard"
-              disabled={busy === a.name || a.kind === "learner" || a.kind === "coordinator"}
-              onClick={() => act(a.name, "kill")}
+      <div className="flex flex-col gap-1.5 border-b px-4 py-3">
+        <SerifTitle as="h3" sans="Leases live" serif="on the node" className="text-base font-medium" />
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          An agent claims a request by writing <span className="num">claimed_by</span> and{" "}
+          <span className="num">lease_until</span> on it, and keeps renewing the lease. Stop a Dispatch agent while it
+          works: its lease runs out and another copy takes the request.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2.5 p-3">
+        {agents.map((a) => {
+          const st = STATE[a.state];
+          const held = queue.find((q) => q.claimed_by === a.name && (q.lease_until ?? 0) > now);
+          const left = held ? Math.max(0, (held.lease_until! - now) / 1000) : 0;
+          const canStop = !(a.kind === "learner" || a.kind === "coordinator");
+          return (
+            <div
+              key={a.name}
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border p-3",
+                a.state === "dead" ? "border-destructive bg-critical-soft" : "bg-card",
+              )}
             >
-              Stop
-            </button>
-          )}
-          <span className="st">
-            {a.state === "dead"
-              ? "Stopped mid-shift. Its leases will expire."
-              : a.state === "stale"
-                ? "No heartbeat. The worker process may be down."
-                : a.state === "working"
-                  ? `Working${a.job ? ` on ${a.job}` : ""}`
-                  : "Waiting for work"}
-            . {a.processed} finished.
-          </span>
-          <span />
-          <span className="bar" aria-hidden="true">
-            <i />
-          </span>
-        </div>
-      ))}
+              <div className="flex items-center gap-2">
+                <span className={cn("size-2 rounded-full", st.dot)} aria-hidden="true" />
+                <span className="num text-[13px] font-semibold">{a.name}</span>
+                <span className={cn("num text-[10px] font-semibold", st.text)}>{st.label}</span>
+                <span className="flex-1" />
+                {a.state === "dead" ? (
+                  <Button variant="outline" size="sm" disabled={busy === a.name} onClick={() => act(a.name, "revive")}>
+                    <RotateCcwIcon data-icon="inline-start" />
+                    Restart
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy === a.name || !canStop}
+                    onClick={() => act(a.name, "kill")}
+                  >
+                    <SquareIcon data-icon="inline-start" />
+                    Stop
+                  </Button>
+                )}
+              </div>
+              {held ? (
+                <div className="num flex flex-col gap-0.5 rounded-lg bg-muted px-2.5 py-2 text-[10.5px] text-muted-foreground">
+                  <span className="font-semibold text-foreground">(:Request {`{id:'${held.id}'}`})</span>
+                  <span>&nbsp; claimed_by: '{a.name}'</span>
+                  <span className="text-primary">&nbsp; lease_until: now + {left.toFixed(1)} s</span>
+                </div>
+              ) : (
+                <p className="text-[13px] text-muted-foreground">
+                  {a.state === "dead"
+                    ? "Stopped mid-shift. Its leases will expire."
+                    : a.state === "stale"
+                      ? "No heartbeat. The worker process may be down."
+                      : a.state === "working"
+                        ? `Working${a.job ? ` on ${a.job}` : ""}`
+                        : "Waiting for work"}
+                </p>
+              )}
+              <span className="num text-[10.5px] text-muted-foreground">{a.processed} finished</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-const LESSON_KIND: Record<string, string> = {
-  road_risk: "Changes routes",
-  team_skill: "Changes team choice",
-  area_risk: "Changes priority",
-  general: "For coordinators",
+const LESSON_KIND: Record<string, { label: string; icon: LucideIcon }> = {
+  road_risk: { label: "Changes routes", icon: RouteIcon },
+  team_skill: { label: "Changes team choice", icon: UsersIcon },
+  area_risk: { label: "Changes priority", icon: ArrowUpWideNarrowIcon },
+  general: { label: "For coordinators", icon: FileTextIcon },
 };
 
-export function LessonsPanel({ lessons, onLearn }: { lessons: Lesson[]; onLearn: () => Promise<void> }) {
+type Override = Lesson["override"];
+
+/** Whether Triage and Dispatch act on a lesson: a coordinator's override wins over confidence. */
+const inUse = (l: Lesson) => l.override !== "off" && (l.override === "on" || l.confidence >= 0.5);
+
+function LessonCard({ l, onOverride }: { l: Lesson; onOverride: (key: string, o: Override) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const pct = Math.round(l.confidence * 100);
+  const strong = l.confidence >= 0.5;
+  const active = inUse(l);
+  const dismissed = l.override === "off";
+  const kind = LESSON_KIND[l.kind] ?? { label: l.kind, icon: FileTextIcon };
+  const Icon = kind.icon;
+  const set = async (o: Override) => {
+    setBusy(true);
+    try {
+      await onOverride(l.key, o);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const status = dismissed ? "Dismissed" : l.override === "on" ? "Applied by hand" : active ? "Active" : "Not applied";
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2.5 rounded-xl border p-3.5",
+        dismissed ? "bg-muted/60 text-muted-foreground" : active ? "bg-card" : "border-medium/30 bg-medium-soft",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium", active ? "bg-muted" : "bg-background")}>
+          <Icon className="size-3.5" aria-hidden="true" />
+          {kind.label}
+        </span>
+        <span
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold",
+            dismissed ? "bg-background text-muted-foreground" : active ? "bg-success-soft text-success" : "bg-background text-medium",
+          )}
+        >
+          <span
+            className={cn("size-1.5 rounded-full", dismissed ? "bg-muted-foreground" : active ? "bg-success" : "bg-medium")}
+            aria-hidden="true"
+          />
+          {status}
+        </span>
+      </div>
+      <p className={cn("text-sm leading-relaxed", dismissed && "line-through decoration-muted-foreground/50")}>{l.text}</p>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Confidence</span>
+          <span className={cn("num font-semibold", !strong && !dismissed && "text-medium")}>
+            {pct}% · {pct >= 75 ? "strong" : strong ? "good" : "weak"}
+          </span>
+        </div>
+        <div className="relative h-3" role="img" aria-label={`Confidence ${pct}%, applied at 50% or more`}>
+          <span className={cn("absolute inset-x-0 top-1 h-1 rounded-full", strong ? "bg-muted" : "bg-medium/20")} />
+          <span
+            className={cn("absolute top-1 left-0 h-1 rounded-full", dismissed ? "bg-muted-foreground/50" : strong ? "bg-primary" : "bg-medium")}
+            style={{ width: `${pct}%` }}
+          />
+          <span className="absolute top-0 left-1/2 h-3 w-px bg-foreground/50" aria-hidden="true" />
+        </div>
+        {l.override ? (
+          <p className="text-xs text-muted-foreground">
+            {l.override === "on" ? "Applied" : "Dismissed"} by {l.override_by ?? "a coordinator"}. The Learner still updates the
+            confidence.
+          </p>
+        ) : (
+          !strong && <p className="text-xs text-medium">A lesson changes decisions at 50% confidence. It needs more field evidence.</p>
+        )}
+      </div>
+      <div className={cn("flex flex-wrap items-center justify-between gap-2 border-t pt-2", !active && !dismissed && "border-medium/25")}>
+        <span className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <FileTextIcon className="size-3" aria-hidden="true" />
+            {l.evidence.length} {l.evidence.length === 1 ? "piece" : "pieces"} of evidence
+          </span>
+          <span className="flex items-center gap-1">
+            <GitBranchIcon className="size-3" aria-hidden="true" />
+            {l.used ? `Used in ${l.used} decisions` : "Not used yet"}
+          </span>
+        </span>
+        <span className="flex items-center gap-1">
+          {l.evidence.length > 0 && (
+            <Button variant="link" size="xs" className="h-auto px-1" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+              {open ? "Hide evidence" : "View evidence"}
+            </Button>
+          )}
+          {l.override ? (
+            <Button variant="outline" size="xs" disabled={busy} onClick={() => set(null)}>
+              {dismissed ? "Restore" : "Clear"}
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" size="xs" disabled={busy} onClick={() => set("off")}>
+                Dismiss
+              </Button>
+              {!strong && (
+                <Button variant="outline" size="xs" disabled={busy} onClick={() => set("on")}>
+                  Apply now
+                </Button>
+              )}
+            </>
+          )}
+        </span>
+      </div>
+      {open && (
+        <div className="overflow-hidden rounded-lg border bg-background">
+          <div className="num flex justify-between bg-muted px-3 py-1.5 text-[10px] font-semibold">
+            <span>Evidence · {l.evidence.length}</span>
+            <span className="text-primary">DERIVED_FROM</span>
+          </div>
+          {l.evidence.slice(0, 12).map((ev) => (
+            <div key={ev} className="num border-t px-3 py-1.5 text-[11px]">
+              {ev}
+            </div>
+          ))}
+        </div>
+      )}
+      {l.by && l.by !== "rules" && <span className="num text-[10px] text-muted-foreground">Proposed by {l.by}</span>}
+    </div>
+  );
+}
+
+export function LessonsPanel({
+  lessons,
+  onLearn,
+  onOverride,
+}: {
+  lessons: Lesson[];
+  onLearn: () => Promise<void>;
+  onOverride: (key: string, o: Override) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const groups: [string, Lesson[]][] = [
+    ["In use", lessons.filter(inUse)],
+    ["Needs more evidence", lessons.filter((l) => !inUse(l) && l.override !== "off")],
+    ["Dismissed", lessons.filter((l) => l.override === "off")],
+  ];
+  const last = lessons.reduce((m, l) => Math.max(m, l.updated_at || 0), 0);
   return (
     <div>
-      <p className="note">
-        The Learner reads field reports, delivery times and observations, then writes lessons back into the graph.
-        Dispatch and Triage apply lessons above 50% confidence.
-      </p>
-      <div style={{ padding: "0 16px 12px" }}>
-        <button
-          type="button"
-          className="btn small"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await onLearn();
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? "Learning…" : "Run the Learner now"}
-        </button>
-      </div>
-      {lessons.length === 0 && (
-        <p className="empty">No lessons yet. They appear after repeated road reports or deliveries.</p>
-      )}
-      {lessons.map((l) => (
-        <div key={l.key} className="lesson">
-          <p>{l.text}</p>
-          <div className={`conf${l.confidence < 0.5 ? " weak" : ""}`} aria-label={`Confidence ${Math.round(l.confidence * 100)}%`}>
-            <i style={{ width: `${Math.round(l.confidence * 100)}%` }} />
-          </div>
-          <div className="meta">
-            <span className="num">{Math.round(l.confidence * 100)}% confident</span>
-            <span>{LESSON_KIND[l.kind] ?? l.kind}</span>
-            <span>{l.evidence.length} pieces of evidence</span>
-            <span>Used in {l.used} decisions</span>
-            {l.by && l.by !== "rules" && <span>Proposed by {l.by}</span>}
-          </div>
+      <div className="flex flex-col gap-2 border-b px-4 py-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <SerifTitle as="h3" sans="What the team" serif="has learned" className="text-base font-medium" />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onLearn();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {busy ? "Learning…" : "Run now"}
+          </Button>
         </div>
-      ))}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          The Learner reads field reports and writes rules into the graph. A rule changes new decisions at 50% confidence or
+          more. A coordinator can apply a rule sooner or dismiss it.{last ? ` Last change ${clock(last)}.` : ""}
+        </p>
+      </div>
+      {lessons.length === 0 ? (
+        <PanelEmpty icon={KeyRoundIcon} title="No lessons yet">
+          They appear after repeated road reports or deliveries.
+        </PanelEmpty>
+      ) : (
+        <div className="flex flex-col gap-2 p-3">
+          {groups.map(([title, list], i) =>
+            list.length ? (
+              <section key={title} className="flex flex-col gap-2" aria-label={title}>
+                <Eyebrow className={cn("px-1 text-foreground", i > 0 && "mt-2")}>
+                  {title} · {list.length}
+                </Eyebrow>
+                {list.map((l) => (
+                  <LessonCard key={l.key} l={l} onOverride={onOverride} />
+                ))}
+              </section>
+            ) : null,
+          )}
+        </div>
+      )}
     </div>
   );
 }

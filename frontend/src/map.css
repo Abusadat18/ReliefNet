@@ -1,0 +1,287 @@
+/* Map tokens. deckLayers.ts and the built-in chart both read these, so the Google map
+   and the offline chart share one look. Households and routes keep the urgency colours. */
+:root,
+.force-light {
+  --ink: #141d21;
+  --ink-2: #4c585d;
+  --ink-3: #8a9195;
+  --paper: #f8f6f1;
+  --land: #ece9e1;
+  --land-edge: #d6d0c3;
+  --water: #cbdde4;
+  --water-deep: #a9c6d2;
+  --water-ink: #5d8fae;
+  --hazard: #d92d20;
+  --route: #2c4d5a;
+  --served: #12805c;
+  --served-soft: #e4efe8;
+  --waiting: #b54708;
+  --waiting-soft: #f8ece1;
+  --mask: rgb(248 246 241 / 0.62);
+}
+.dark {
+  --ink: #eef1f2;
+  --ink-2: #9aa6ab;
+  --ink-3: #6e7a7f;
+  --paper: #141d21;
+  --land: #172227;
+  --land-edge: #26343b;
+  --water: #1d3440;
+  --water-deep: #24465a;
+  --water-ink: #6e9fbf;
+  --hazard: #f04438;
+  --route: #b9dcf2;
+  --served: #2fbf8a;
+  --served-soft: #15261e;
+  --waiting: #f79009;
+  --waiting-soft: #2a1d13;
+  --mask: rgb(11 17 20 / 0.6);
+}
+
+.gmap {
+  position: absolute;
+  inset: 0;
+  background: var(--land);
+}
+
+.chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background: var(--water);
+}
+.chart.dragging {
+  cursor: grabbing;
+}
+.chart text {
+  font-family: var(--font-sans);
+}
+.chart .land-outside {
+  fill: color-mix(in srgb, var(--land) 50%, var(--paper));
+}
+.chart .land {
+  fill: var(--land);
+  stroke: var(--land-edge);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart .ward-line {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-opacity: 0.6;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.chart .ward-label {
+  fill: var(--ink-3);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.chart .river {
+  fill: var(--water);
+}
+.chart .water-label {
+  fill: var(--water-ink);
+  font-family: var(--font-serif);
+  font-style: italic;
+  letter-spacing: 0.08em;
+}
+.chart .water-line {
+  fill: none;
+  stroke: var(--water-deep);
+  stroke-width: 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart .water-line.river,
+.chart .water-line.canal {
+  stroke-width: 7;
+}
+.chart .rail {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.chart .rail-ties {
+  fill: none;
+  stroke: var(--paper);
+  stroke-width: 1.4;
+  stroke-dasharray: 6 6;
+  vector-effect: non-scaling-stroke;
+}
+.chart .road {
+  stroke: var(--ink-3);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.chart .road.bridge {
+  stroke: var(--ink);
+  stroke-width: 4.5;
+}
+.chart .road.reported {
+  stroke: var(--waiting);
+  stroke-dasharray: 6 5;
+  stroke-width: 3.5;
+}
+.chart .road.flooded {
+  stroke: var(--hazard);
+  stroke-width: 5;
+}
+/* Low roads near drains: a thin, calm line, not a dense dash. */
+.chart .road.low:not(.bridge):not(.reported):not(.flooded) {
+  stroke: var(--water-ink);
+  stroke-opacity: 0.6;
+  stroke-width: 1.6;
+}
+.chart .road-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  fill: none;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+.chart .road-hit:hover + .road,
+.chart .road-hit:focus-visible + .road {
+  stroke: var(--route);
+}
+.chart .flood-mark {
+  stroke: var(--hazard);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart .route {
+  fill: none;
+  stroke: var(--route);
+  stroke-opacity: 0.35;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart .route.focus {
+  stroke-opacity: 1;
+  stroke-width: 4;
+}
+.chart .route-casing {
+  fill: none;
+  stroke: var(--paper);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart .landmark circle {
+  fill: var(--paper);
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart .landmark text {
+  fill: var(--ink-2);
+}
+.chart .shelter circle {
+  fill: var(--served-soft);
+  stroke: var(--served);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.chart .shelter text {
+  fill: var(--served);
+  font-weight: 500;
+}
+.chart .team rect {
+  fill: var(--ink);
+}
+.chart .team text {
+  fill: var(--paper);
+  font-weight: 600;
+}
+.chart .household {
+  cursor: pointer;
+}
+.chart .household circle {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart .household.UNSERVED circle.dot {
+  fill: var(--waiting);
+  stroke: var(--paper);
+}
+.chart .household.ASSIGNED circle.dot {
+  fill: var(--route);
+  stroke: var(--paper);
+}
+.chart .household.SERVED circle.dot {
+  fill: var(--paper);
+  stroke: var(--served);
+}
+.chart .household.selected circle.dot {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+.chart .household .pill {
+  stroke: var(--paper);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart .household.UNSERVED .pill {
+  fill: var(--hazard);
+}
+.chart .household.ASSIGNED .pill {
+  fill: var(--route);
+}
+.chart .household .pill-text {
+  fill: #ffffff;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.dark .chart .household.ASSIGNED .pill-text {
+  fill: var(--paper);
+}
+.chart .cluster circle {
+  fill: var(--ink);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.chart .cluster text {
+  fill: var(--paper);
+  font-weight: 700;
+}
+.chart .pending {
+  fill: var(--ink-3);
+}
+.chart .pulse {
+  fill: none;
+  stroke: var(--hazard);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  animation: pulse 1.6s ease-out 2;
+}
+.chart .road-label {
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-linejoin: round;
+}
+@keyframes pulse {
+  from {
+    opacity: 1;
+    r: 6;
+  }
+  to {
+    opacity: 0;
+    r: 40;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart .pulse {
+    animation: none;
+  }
+}

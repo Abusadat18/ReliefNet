@@ -1,8 +1,13 @@
+import { ArrowUpIcon, CameraIcon, CheckIcon, LogOutIcon, NavigationIcon, PhoneIcon, RouteIcon, SendIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
+import { Eyebrow, urgency } from "../components/kit";
 import { clock, needLabel, useLiveEvents } from "../hooks";
 import type { Assignment, ChatTurn, LiveEvent } from "../types";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 interface FieldMe {
   user: { id: string; name: string; team: string | null; org: string };
@@ -19,6 +24,11 @@ const ACTION_LABEL: Record<string, string> = {
   nearest_shelters: "Found shelters",
   road_status: "Checked roads",
 };
+
+function initials(name: string) {
+  const parts = name.replace(/^Team\s+/i, "").split(/\s+/).filter(Boolean);
+  return (parts[0]?.[0] ?? "T") + (parts[1]?.[0] ?? "");
+}
 
 export function Field() {
   const { me, config, signOut, refresh } = useSession();
@@ -66,10 +76,7 @@ export function Field() {
       setTurns((x) => [...x, { role: "agent", text: r.reply, at: Date.now(), actions: r.actions }]);
       void load();
     } catch (e) {
-      setTurns((x) => [
-        ...x,
-        { role: "agent", text: `Not sent: ${e instanceof Error ? e.message : String(e)}. Try again.`, at: Date.now() },
-      ]);
+      setTurns((x) => [...x, { role: "agent", text: `Not sent: ${e instanceof Error ? e.message : String(e)}. Try again.`, at: Date.now() }]);
     } finally {
       setSending(false);
     }
@@ -95,137 +102,215 @@ export function Field() {
   const jobs = data?.assignments ?? [];
   const next = jobs[0];
   const team = data?.user.team ?? me?.team;
+  const u = urgency(next?.priority);
 
   return (
-    <div className="field-app">
-      <header className="field-head">
-        <div>
-          <b>{team ?? "No team yet"}</b>
-          <span>
-            {me?.name}, {me?.org_name}
+    <div className="mx-auto flex h-dvh max-w-xl flex-col bg-background">
+      <header className="flex shrink-0 items-center gap-2.5 border-b px-4 py-3">
+        <span className="num grid size-8 shrink-0 place-items-center rounded-lg bg-slate text-xs font-bold text-white">
+          {team ? initials(team).toUpperCase() : "?"}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <b className="truncate text-[15px] font-semibold">{team ?? "No team yet"}</b>
+          <span className="truncate text-xs text-muted-foreground">
+            {me?.name} · {me?.org_name}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn small"
-            onClick={async () => setLink(await api.post("/api/field/telegram-link"))}
-            disabled={!!data?.telegram_linked}
-          >
-            {data?.telegram_linked ? "Telegram linked" : "Link Telegram"}
-          </button>
-          <button type="button" className="btn small" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
+        {data?.telegram_linked ? (
+          <span className="num inline-flex h-6 items-center gap-1 rounded-full bg-success-soft px-2 text-[9px] font-semibold text-success">
+            <SendIcon className="size-3" aria-hidden="true" />
+            LINKED
+          </span>
+        ) : (
+          <Button variant="outline" size="sm" onClick={async () => setLink(await api.post("/api/field/telegram-link"))}>
+            <SendIcon data-icon="inline-start" />
+            Link Telegram
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out" title="Sign out">
+          <LogOutIcon />
+        </Button>
       </header>
 
-      {!team ? (
-        <section className="next-job none">
-          <h2>Join your team</h2>
-          <p className="line">Choose the team you are working with today. Assignments for that team will appear here.</p>
-          {teams.length === 0 && (
-            <p className="line">Your organisation has no teams yet. Ask an admin to add a team.</p>
-          )}
-          <div className="quick" style={{ flexWrap: "wrap" }}>
-            {teams.map((t) => (
-              <button
-                key={t.name}
-                type="button"
-                onClick={async () => {
-                  await api.post("/api/field/team", { team: t.name });
-                  refresh();
-                  void load();
-                }}
-              >
-                {t.name}
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : next ? (
-        <section className="next-job" aria-label="Next assignment">
-          <h2>
-            {next.name || next.family}, ward {next.ward}
-          </h2>
-          <div className="line">
-            {next.landmark ? `Near ${next.landmark}. ` : ""}
-            {next.people} people. Needs {next.needs.map(needLabel).join(", ")}.
-          </div>
-          <div className="route-line">
-            {next.id}, ETA {next.eta_min} min{next.roads?.length ? ` via ${next.roads.join(", ")}` : ""}
-          </div>
-          {jobs.length > 1 && (
-            <button type="button" className="more" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? "Hide other assignments" : `${jobs.length - 1} more assignment${jobs.length > 2 ? "s" : ""}`}
-            </button>
-          )}
-          {showAll && (
-            <div className="jobs">
-              {jobs.slice(1).map((j) => (
-                <div key={j.id}>
-                  <b>{j.name || j.family}</b>, ward {j.ward} {j.landmark}: {j.needs.map(needLabel).join(", ")} ({j.id}, ETA{" "}
-                  {j.eta_min} min)
-                </div>
+      <div className="shrink-0 px-3 pt-3 pb-1">
+        {!team ? (
+          <section className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+            <h2 className="text-xl font-normal tracking-tight">
+              Join your <span className="accent-serif">team</span>
+            </h2>
+            <p className="text-sm text-muted-foreground">Choose the team you are working with today. Assignments for that team appear here.</p>
+            {teams.length === 0 && <p className="text-sm text-muted-foreground">Your organisation has no teams yet. Ask an admin to add a team.</p>}
+            <div className="flex flex-wrap gap-2">
+              {teams.map((t) => (
+                <Button
+                  key={t.name}
+                  variant="outline"
+                  onClick={async () => {
+                    await api.post("/api/field/team", { team: t.name });
+                    refresh();
+                    void load();
+                  }}
+                >
+                  {t.name}
+                </Button>
               ))}
             </div>
-          )}
-        </section>
-      ) : (
-        <section className="next-job none">
-          <h2>No assignment right now</h2>
-          <div className="line">Dispatch will send the next household here. You can still report roads and new needs.</div>
-        </section>
-      )}
-
-      <div className="thread" ref={threadRef} aria-live="polite">
-        {turns.length === 0 && (
-          <div className="bubble agent">
-            Tell me what is happening. For example: "done {next?.id ?? "R-123"}, gave water and tablets", "{config?.area.example_road_report}",
-            or "7 people on a roof near the school, ward 10".
-          </div>
-        )}
-        {turns.map((t, i) => (
-          <div key={i} className={`bubble ${t.role}`}>
-            {t.text}
-            {t.actions && t.actions.length > 0 && (
-              <span className="acts">
-                {t.actions.map((a, j) => (
-                  <span key={j} className="chip s-DELIVERED">
-                    {ACTION_LABEL[a.tool] ?? a.tool}
-                  </span>
-                ))}
+          </section>
+        ) : next ? (
+          <section className="flex flex-col gap-3 rounded-2xl bg-slate p-[18px] text-white" aria-label="Next assignment">
+            <div className="flex items-center justify-between gap-2">
+              <span className="eyebrow text-[#9fb0b6]">[ Next job · {next.id} ]</span>
+              {next.priority != null && (
+                <span
+                  className={cn(
+                    "num inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold",
+                    u.key === "critical" || u.key === "high" ? "bg-[#f0443833] text-[#ff8a80]" : "bg-white/10 text-white/80",
+                  )}
+                >
+                  PRIORITY {next.priority}
+                </span>
+              )}
+            </div>
+            <h2 className="text-[26px] leading-tight font-normal tracking-tight">
+              {next.name || next.family}, <span className="accent-serif">ward {next.ward}</span>
+            </h2>
+            <p className="text-sm leading-relaxed text-[#d5dbe1]">
+              {next.landmark ? `Near ${next.landmark}. ` : ""}
+              {next.people} people. Needs {next.needs.map(needLabel).join(", ")}.
+            </p>
+            <div className="flex items-start gap-2 rounded-lg bg-white/10 px-2.5 py-2 text-xs text-[#eef1f2]">
+              <RouteIcon className="mt-0.5 size-3.5 shrink-0 text-rain" aria-hidden="true" />
+              <span>
+                ETA {next.eta_min} min{next.roads?.length ? ` via ${next.roads.slice(0, 3).join(", ")}${next.roads.length > 3 ? "…" : ""}` : ""}
               </span>
+            </div>
+            {(next.lat != null && next.lon != null) || next.call ? (
+              <div className="flex gap-2">
+                {next.lat != null && next.lon != null && (
+                  <Button
+                    render={
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${next.lat},${next.lon}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Google's route can differ. Follow the safe route above."
+                      />
+                    }
+                    nativeButton={false}
+                    className="h-10 flex-1 bg-rain font-semibold text-slate hover:bg-white"
+                  >
+                    <NavigationIcon data-icon="inline-start" />
+                    Open in Maps
+                  </Button>
+                )}
+                {next.call && (
+                  <Button
+                    render={<a href={`tel:${next.call}`} />}
+                    nativeButton={false}
+                    variant="outline"
+                    className="h-10 border-white/35 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                  >
+                    <PhoneIcon data-icon="inline-start" />
+                    Call
+                  </Button>
+                )}
+              </div>
+            ) : null}
+            {jobs.length > 1 && (
+              <button type="button" className="self-start text-xs font-medium text-[#9fb0b6]" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "Hide other assignments" : `${jobs.length - 1} more assignment${jobs.length > 2 ? "s" : ""}  ›`}
+              </button>
             )}
-            <time>{clock(t.at)}</time>
-          </div>
-        ))}
-        {sending && <div className="bubble agent">Recording…</div>}
+            {showAll && (
+              <ul className="flex flex-col gap-1.5 border-t border-white/15 pt-2 text-xs text-[#d5dbe1]">
+                {jobs.slice(1).map((j) => (
+                  <li key={j.id}>
+                    <b className="font-semibold text-white">{j.name || j.family}</b>, ward {j.ward} {j.landmark}: {j.needs.map(needLabel).join(", ")}{" "}
+                    <span className="num">
+                      ({j.id}, ETA {j.eta_min} min)
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <section className="flex flex-col gap-1.5 rounded-2xl border bg-card p-4">
+            <h2 className="text-xl font-normal tracking-tight">
+              No assignment <span className="accent-serif">right now</span>
+            </h2>
+            <p className="text-sm text-muted-foreground">Dispatch sends the next household here. You can still report roads and new needs.</p>
+          </section>
+        )}
       </div>
 
-      <form className="composer" onSubmit={onSubmit}>
-        <div className="quick" aria-label="Quick replies">
+      <div ref={threadRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-muted px-4 py-4" aria-live="polite">
+        {turns.length > 0 && <Eyebrow className="self-center">Today</Eyebrow>}
+        {turns.length === 0 && (
+          <div className="max-w-[85%] self-start rounded-2xl rounded-bl-sm border bg-background px-3.5 py-2.5 text-sm leading-relaxed">
+            Tell me what is happening. For example: “done {next?.id ?? "R-123"}, gave water and tablets”, “{config?.area.example_road_report}”,
+            or “7 people on a roof near the school, ward 10”.
+          </div>
+        )}
+        {turns.map((t, i) => {
+          const me = t.role === "user";
+          return (
+            <div key={i} className={cn("flex max-w-[85%] flex-col gap-1", me ? "items-end self-end" : "items-start self-start")}>
+              <div
+                className={cn(
+                  "flex flex-col gap-1.5 px-3.5 py-2.5 text-sm leading-relaxed",
+                  me ? "rounded-2xl rounded-br-sm bg-primary text-primary-foreground" : "rounded-2xl rounded-bl-sm border bg-background",
+                )}
+              >
+                <span className="whitespace-pre-line">{t.text}</span>
+                {t.actions && t.actions.length > 0 && (
+                  <span className="flex flex-wrap gap-1">
+                    {t.actions.map((a, j) => (
+                      <span key={j} className="num inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-semibold text-success uppercase">
+                        <CheckIcon className="size-3" aria-hidden="true" />
+                        {ACTION_LABEL[a.tool] ?? a.tool}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+              <time className="num text-[10px] text-muted-foreground">
+                {clock(t.at)}
+                {!me && " · Field agent"}
+              </time>
+            </div>
+          );
+        })}
+        {sending && <div className="self-start rounded-2xl rounded-bl-sm border bg-background px-3.5 py-2.5 text-sm text-muted-foreground">Recording…</div>}
+      </div>
+
+      <form className="flex shrink-0 flex-col gap-2.5 border-t px-3 pt-2.5 pb-[max(12px,env(safe-area-inset-bottom))]" onSubmit={onSubmit}>
+        <div className="flex gap-1.5 overflow-x-auto" aria-label="Quick replies">
           {next && (
-            <button type="button" onClick={() => setText(`Done ${next.id}, gave ${next.needs.map(needLabel).join(" and ")}`)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => setText(`Done ${next.id}, gave ${next.needs.map(needLabel).join(" and ")}`)}>
               Delivered to {next.name || next.family}
-            </button>
+            </Button>
           )}
-          <button type="button" className="hz" onClick={() => setText(config?.area.example_road_report ?? "")}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-destructive text-destructive"
+            onClick={() => setText(config?.area.example_road_report ?? "")}
+          >
             Road flooded
-          </button>
-          <button type="button" onClick={() => void send("What are my tasks?")}>
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void send("What are my tasks?")}>
             My tasks
-          </button>
-          <button type="button" onClick={() => void send("Nearest shelter with space?")}>
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void send("Nearest shelter with space?")}>
             Nearest shelter
-          </button>
+          </Button>
         </div>
-        <div className="compose-row">
-          <button type="button" className="icon-btn" aria-label="Send a photo" onClick={() => fileRef.current?.click()}>
-            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h3l2-2h6l2 2h3v12H4z M12 10a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            </svg>
-          </button>
+        <div className="flex items-center gap-1.5 rounded-full border bg-background py-1 pr-1 pl-1.5">
+          <Button type="button" variant="ghost" size="icon" aria-label="Send a photo" onClick={() => fileRef.current?.click()}>
+            <CameraIcon />
+          </Button>
           <input
             ref={fileRef}
             type="file"
@@ -249,42 +334,41 @@ export function Field() {
               }
             }}
             placeholder="Type in English or Hinglish"
+            className="max-h-28 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground"
           />
-          <button type="submit" className="icon-btn send" aria-label="Send" disabled={sending || !text.trim()}>
-            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 20l18-8L3 4v6l12 2l-12 2z" fill="currentColor" />
-            </svg>
-          </button>
+          <Button type="submit" size="icon" aria-label="Send" disabled={sending || !text.trim()}>
+            <ArrowUpIcon />
+          </Button>
         </div>
       </form>
 
-      {link && (
-        <>
-          <div className="scrim" onClick={() => setLink(null)} />
-          <div className="dialog" role="dialog" aria-modal="true" aria-label="Link Telegram">
-            <h2>Link Telegram</h2>
-            {link.deep_link ? (
-              <p>
-                Open <a href={link.deep_link}>@{link.bot}</a> and press Start. The code links automatically.
-              </p>
-            ) : (
-              <p>
-                Open the ReliefNet bot in Telegram{config?.telegram_bot ? ` (@${config.telegram_bot})` : ""} and send this
-                message:
-              </p>
-            )}
-            <p style={{ fontSize: "var(--step-3)", fontWeight: 850, color: "var(--ink)" }} className="num">
-              /link {link.code}
-            </p>
-            <p>The code works once and expires in 15 minutes. After linking, new assignments arrive in Telegram too.</p>
-            <div className="row">
-              <button type="button" className="btn primary" onClick={() => setLink(null)}>
-                Done
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      <Dialog open={!!link} onOpenChange={(o) => !o && setLink(null)}>
+        <DialogContent className="gap-4 p-6">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-normal">
+              Link <span className="accent-serif">Telegram</span>
+            </DialogTitle>
+            <DialogDescription>
+              {link?.deep_link ? (
+                <>
+                  Open{" "}
+                  <a className="text-primary underline" href={link.deep_link}>
+                    @{link.bot}
+                  </a>{" "}
+                  and press Start. The code links automatically.
+                </>
+              ) : (
+                <>Open the ReliefNet bot in Telegram{config?.telegram_bot ? ` (@${config.telegram_bot})` : ""} and send this message:</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="num rounded-xl bg-slate px-4 py-3 text-2xl font-semibold text-white">/link {link?.code}</p>
+          <p className="text-sm text-muted-foreground">The code works once and expires in 15 minutes. After linking, new assignments arrive in Telegram too.</p>
+          <DialogFooter className="-mx-6 -mb-6 px-6">
+            <Button onClick={() => setLink(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

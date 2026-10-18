@@ -1,4 +1,5 @@
 import type { FamilyPoint, Region, Road, Snapshot } from "../types";
+import { clusterFamilies, clusterRing } from "./clusters";
 import type { Visible } from "./LayersMenu";
 
 export interface Flash {
@@ -24,10 +25,13 @@ export interface LayerProps {
 
 interface Props extends LayerProps {
   P: Project;
-  /** SVG units per screen pixel. */
+  /** SVG units (metres) per screen pixel. */
   u: number;
   showLabels: boolean;
+  onZoomTo: (lat: number, lon: number) => void;
 }
+
+const M_PER_DEG_LAT = 111_000;
 
 /**
  * Flooded roads always get a label; bridges only when zoomed in. A label that would
@@ -54,28 +58,65 @@ function middle(P: Project, coords: [number, number][]): [number, number] {
   return P(...coords[Math.floor((coords.length - 1) / 2)]);
 }
 
+const RING = { hazard: "var(--hazard)", waiting: "var(--waiting)", route: "var(--water-ink)" };
+
 /** The operational layers of the built-in chart. deckLayers.ts draws the same on the Google map. */
 export function MapLayers(props: Props) {
-  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, P, u, showLabels, show } = props;
+  const { region, snapshot, selected, focusRequest, flashes, onSelectFamily, onRoadClick, onZoomTo, P, u, showLabels, show } = props;
   const fams = (snapshot?.families ?? []).filter((f) => show.served || f.status !== "SERVED");
-  const routes = show.routes ? snapshot?.routes ?? [] : [];
+  const selectedReq = fams.find((f) => f.id === selected)?.request ?? null;
+  const focus = focusRequest ?? selectedReq;
+  const all = snapshot?.routes ?? [];
+  const routes = show.routes ? all.filter((r) => r.id !== focus) : [];
   // The route a coordinator opened stays visible even with routes hidden.
-  const focusRoute = (snapshot?.routes ?? []).find((r) => r.id === focusRequest);
+  const focusRoute = all.find((r) => r.id === focus);
   const structure = (r: Road) => r.kind !== "road";
+  // Households closer than 22 px on screen become one count bubble, until the chart is close in.
+  const groups = u < 0.6 ? fams.map((f) => ({ lat: f.lat, lon: f.lon, members: [f] })) : clusterFamilies(fams, M_PER_DEG_LAT / u);
+
+  const household = (f: FamilyPoint) => {
+    const [x, y] = P(f.lat, f.lon);
+    const pill = f.status !== "SERVED" && (f.priority ?? 0) >= 70;
+    const text = String(f.priority);
+    const w = (text.length * 7 + 14) * u;
+    const h = 20 * u;
+    return (
+      <g
+        key={f.id}
+        data-click
+        className={`household ${f.status}${selected === f.id ? " selected" : ""}`}
+        onClick={() => onSelectFamily(f.id)}
+        role="button"
+        tabIndex={0}
+        aria-label={`${f.name || f.id}, ${f.people} people, ${f.status.toLowerCase()}${pill ? `, priority ${f.priority}` : ""}`}
+        onKeyDown={(e) => e.key === "Enter" && onSelectFamily(f.id)}
+      >
+        {pill ? (
+          <>
+            <rect className="pill" x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h / 2} />
+            <text className="pill-text" x={x} y={y + 4 * u} textAnchor="middle" fontSize={11 * u}>
+              {text}
+            </text>
+          </>
+        ) : (
+          <circle className="dot" cx={x} cy={y} r={(selected === f.id ? 8 : 7) * u} />
+        )}
+      </g>
+    );
+  };
 
   return (
     <>
-      {show.wards && region.wards.map((w) => (
-        <path key={`l${w.num}`} className="ward-line" d={line(P, w.polygon, true)} fill="none" />
-      ))}
-      {show.wards && region.wards.map((w) => {
-        const [x, y] = P(w.polygon[0][0], w.polygon[0][1]);
-        return (
-          <text key={`t${w.num}`} className="ward-label" x={x + 10 * u} y={y + 18 * u} fontSize={13 * u}>
-            {w.num}
-          </text>
-        );
-      })}
+      {show.wards && region.wards.map((w) => <path key={`l${w.num}`} className="ward-line" d={line(P, w.polygon, true)} fill="none" />)}
+      {show.wards &&
+        region.wards.map((w) => {
+          const [x, y] = P(w.polygon[0][0], w.polygon[0][1]);
+          return (
+            <text key={`t${w.num}`} className="ward-label" x={x + 10 * u} y={y + 18 * u} fontSize={10 * u}>
+              WARD {w.num}
+            </text>
+          );
+        })}
 
       {region.roads.map((r) => {
         const d = line(P, r.coords);
@@ -123,24 +164,37 @@ export function MapLayers(props: Props) {
       ))}
 
       {routes.map((rt) => (
-        <path key={rt.id} className={`route${rt.id === focusRequest ? " focus" : ""}`} d={line(P, rt.route)} />
+        <path key={rt.id} className="route" d={line(P, rt.route)} />
       ))}
-      {focusRoute && <path className="route focus" d={line(P, focusRoute.route)} />}
+      {focusRoute && (
+        <>
+          <path className="route-casing" d={line(P, focusRoute.route)} />
+          <path className="route focus" d={line(P, focusRoute.route)} />
+        </>
+      )}
 
-      {show.places && region.shelters.map((s) => {
-        const [x, y] = P(s.lat, s.lon);
-        const k = 9 * u;
-        return (
-          <g key={s.id} className="shelter">
-            <path d={`M${x - k},${y + k * 0.8}L${x},${y - k}L${x + k},${y + k * 0.8}Z`} />
-            {showLabels && (
-              <text x={x + k + 3 * u} y={y + 4 * u} fontSize={10.5 * u} fill="var(--served)">
-                {s.name}
-              </text>
-            )}
-          </g>
-        );
-      })}
+      {show.places &&
+        region.shelters.map((s) => {
+          const [x, y] = P(s.lat, s.lon);
+          const k = 11 * u;
+          return (
+            <g key={s.id} className="shelter">
+              <circle cx={x} cy={y} r={k} />
+              <path
+                d={`M${x - 5 * u},${y + 4 * u}L${x},${y - 5 * u}L${x + 5 * u},${y + 4 * u}Z`}
+                fill="none"
+                stroke="var(--served)"
+                strokeWidth={1.4}
+                vectorEffect="non-scaling-stroke"
+              />
+              {showLabels && (
+                <text x={x + k + 4 * u} y={y + 4 * u} fontSize={10.5 * u}>
+                  {s.name}
+                </text>
+              )}
+            </g>
+          );
+        })}
 
       {showLabels &&
         show.places &&
@@ -163,35 +217,40 @@ export function MapLayers(props: Props) {
         return <circle key={p.id} className="pending" cx={x} cy={y} r={3 * u} />;
       })}
 
-      {fams.map((f: FamilyPoint) => {
-        const [x, y] = P(f.lat, f.lon);
-        const r = (4 + Math.sqrt(f.people || 1) * 2.2) * u;
-        const critical = f.status !== "SERVED" && (f.priority ?? 0) >= 70;
+      {groups.map((g) => {
+        if (g.members.length === 1) return household(g.members[0]);
+        const [x, y] = P(g.lat, g.lon);
         return (
           <g
-            key={f.id}
+            key={g.members.map((m) => m.id).join("|")}
+            className="cluster"
             data-click
-            className={`household ${f.status}${selected === f.id ? " selected" : ""}`}
-            onClick={() => onSelectFamily(f.id)}
             role="button"
             tabIndex={0}
-            aria-label={`${f.name || f.id}, ${f.people} people, ${f.status.toLowerCase()}`}
-            onKeyDown={(e) => e.key === "Enter" && onSelectFamily(f.id)}
+            aria-label={`${g.members.length} households here. Zoom in to see each one.`}
+            onClick={() => onZoomTo(g.lat, g.lon)}
+            onKeyDown={(e) => e.key === "Enter" && onZoomTo(g.lat, g.lon)}
+            style={{ cursor: "zoom-in" }}
           >
-            {critical && <circle className="critical" cx={x} cy={y} r={r + 4 * u} />}
-            <circle className="dot" cx={x} cy={y} r={r} />
+            <circle cx={x} cy={y} r={15 * u} stroke={RING[clusterRing(g.members)]} />
+            <text x={x} y={y + 4.5 * u} textAnchor="middle" fontSize={13 * u}>
+              {g.members.length}
+            </text>
           </g>
         );
       })}
 
       {(snapshot?.teams ?? []).map((t) => {
         const [x, y] = P(t.lat, t.lon);
-        const k = 9 * u;
+        const label = `${t.name} · ${t.load} job${t.load === 1 ? "" : "s"}`;
+        const w = (label.length * 6.2 + 18) * u;
+        const h = 22 * u;
         return (
           <g key={t.name} className="team">
-            <rect x={x - k} y={y - k} width={k * 2} height={k * 2} rx={2 * u} />
-            <text x={x} y={y + 3.5 * u} textAnchor="middle" fontSize={10 * u}>
-              {t.name.replace("Team ", "").slice(0, 2)}
+            <circle cx={x} cy={y} r={6 * u} fill="var(--ink)" stroke="var(--paper)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            <rect x={x - w / 2} y={y - 22 * u - h / 2} width={w} height={h} rx={h / 2} />
+            <text x={x} y={y - 22 * u + 4 * u} textAnchor="middle" fontSize={11 * u}>
+              {label}
             </text>
           </g>
         );

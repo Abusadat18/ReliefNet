@@ -7,7 +7,7 @@ Instructions for AI coding agents that work on this repository. For people, star
 ReliefNet coordinates flood relief with a team of AI agents and one shared memory graph in FalkorDB. Help requests arrive as messy messages (Telegram, the web help form, coordinators). The agents read, merge, prioritise, dispatch and remember each request in the graph.
 
 - `backend/`: Python 3.12, FastAPI, FalkorDB, LangChain and LangGraph.
-- `frontend/`: React 18, TypeScript, Vite, deck.gl.
+- `frontend/`: React 19, TypeScript, Vite, Tailwind CSS 4, shadcn/ui (Base UI, `base-nova` style), deck.gl.
 - The default area is Rajendra Nagar and Kankarbagh in Patna, with real roads from OpenStreetMap.
 
 ## Commands
@@ -82,6 +82,11 @@ ID prefixes: `M-` message, `R-` request, `F-` family, `O-` observation, `RP-` ro
 | Location from a pin, a landmark or a ward | `geo.py` |
 | Area data (landmarks, wards, shelters, team bases, drill) | `areas/<area>.py`. See [docs/AREAS.md](docs/AREAS.md). |
 | A dashboard screen | `frontend/src/pages/`, `frontend/src/components/` |
+| A shadcn/ui component | `frontend/src/components/ui/`, with `npx shadcn@latest add <name>` |
+| Colours, fonts, radius (light and dark) | `frontend/src/index.css`. Use the tokens (`bg-primary`, `text-muted-foreground`, `bg-critical-soft`), not raw colours. |
+| Colours of the Google map layers and the built-in chart | `frontend/src/map.css`. `deckLayers.ts` reads these tokens. |
+| Shared UI pieces (bracket eyebrow, serif heading, score tile, graph receipt) | `frontend/src/components/kit.tsx` |
+| The graph edge behind a live event or a queue row | `frontend/src/components/graph.ts` |
 | An API call from the frontend | `frontend/src/api.ts`, with types in `frontend/src/types.ts` |
 
 Do not put Cypher in an agent file. Put it in `memory.py`, so all agent queries are in one place.
@@ -98,6 +103,8 @@ Do not put Cypher in an agent file. Put it in `memory.py`, so all agent queries 
 - **Demo timings.** `LEASE_MS=8000` and `DISPATCH_WORK_MS=2000` are short on purpose, for the crash demo. Do not treat them as production values.
 - **Tests use the active area.** Road names and junctions in `test_graph.py` come from `AREA`. Do not write a Patna road name into a test that must run on every area.
 - **Do not commit OSM download caches.** The importer's `--cache` file is local only.
+- **The shadcn CLI can add a wrong `cn` package.** After `npx shadcn@latest add`, check `frontend/package.json` for a `"cn"` dependency and remove it (`npm uninstall cn`). Also replace `from "cn"` with `from "@/lib/utils"` in the new files.
+- **Base UI, not Radix.** shadcn components here use `render={<Button />}` for custom triggers, not `asChild`. A `Slider` needs an array value (`value={[n]}`), or it draws two thumbs.
 
 ## Code style
 

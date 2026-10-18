@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { LayersIcon } from "lucide-react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 
 export type LayerKey = "wards" | "routes" | "served" | "low" | "places";
 export type Visible = Record<LayerKey, boolean>;
 
 const LAYERS: { key: LayerKey; label: string; hint: string }[] = [
   { key: "wards", label: "Ward zones", hint: "The 16 zones that messages call “ward 11”" },
-  { key: "routes", label: "Team routes", hint: "The way each team takes" },
+  { key: "routes", label: "Team routes", hint: "The way each team takes. The selected route stays bold." },
   { key: "served", label: "Served households", hint: "Households that got help" },
   { key: "low", label: "Low roads near drains", hint: "Roads that flood first" },
   { key: "places", label: "Landmarks and shelters", hint: "Places from the gazetteer, and relief camps" },
@@ -37,39 +41,35 @@ export function useMapLayers(): [Visible, (key: LayerKey, on: boolean) => void] 
 }
 
 export function LayersMenu({ visible, onChange }: { visible: Visible; onChange: (key: LayerKey, on: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   const hidden = LAYERS.filter((l) => !visible[l.key]).length;
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent | KeyboardEvent) => {
-      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-
   return (
-    <div className="layers-menu" ref={ref}>
-      <button type="button" className="layers-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        Layers{hidden ? ` (${hidden} hidden)` : ""}
-      </button>
-      {open && (
-        <fieldset className="layers-list">
-          <legend className="sr-only">Show on the map</legend>
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button variant="outline" size="sm" className="bg-background shadow-sm">
+            <LayersIcon data-icon="inline-start" />
+            Layers
+            {hidden > 0 && <span className="num text-[10px] text-muted-foreground">{hidden} off</span>}
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-80">
+        <PopoverHeader>
+          <PopoverTitle>Show on the map</PopoverTitle>
+          <PopoverDescription>Each browser keeps its own choice.</PopoverDescription>
+        </PopoverHeader>
+        <div className="flex flex-col">
           {LAYERS.map((l) => (
-            <label key={l.key} title={l.hint}>
-              <input type="checkbox" checked={visible[l.key]} onChange={(e) => onChange(l.key, e.target.checked)} />
-              {l.label}
+            <label key={l.key} className="flex cursor-pointer items-start justify-between gap-3 rounded-md px-1 py-2 hover:bg-muted">
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">{l.label}</span>
+                <span className="text-xs text-muted-foreground">{l.hint}</span>
+              </span>
+              <Switch checked={visible[l.key]} onCheckedChange={(on) => onChange(l.key, on)} className="mt-0.5" />
             </label>
           ))}
-        </fieldset>
-      )}
-    </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

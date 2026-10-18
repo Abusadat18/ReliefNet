@@ -1,38 +1,60 @@
+import { FileTextIcon, PlayIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { useSession } from "../auth";
 import { clock } from "../hooks";
 import { Md } from "./Md";
+import { ErrorLine, ResultLine } from "./kit";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog as DialogRoot,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
+/** A modal with a title that pairs sans and serif, as in Design.pen ("Flood *drill*"). */
 export function Dialog({
   title,
+  serif,
+  description,
   onClose,
   children,
+  footer,
   wide = false,
 }: {
   title: string;
+  serif?: string;
+  description?: ReactNode;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
   wide?: boolean;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
   return (
-    <>
-      <div className="scrim" onClick={onClose} />
-      <div className={`dialog${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>{title}</h2>
-          <button type="button" className="btn quiet" onClick={onClose}>
-            Close
-          </button>
-        </div>
+    <DialogRoot open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className={cn("max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto p-6", wide ? "sm:max-w-3xl" : "sm:max-w-lg")}>
+        <DialogHeader className="pr-8">
+          <DialogTitle className="text-[22px] font-normal tracking-tight">
+            {title}
+            {serif && <span className="accent-serif"> {serif}</span>}
+          </DialogTitle>
+          {description && <DialogDescription className="leading-relaxed">{description}</DialogDescription>}
+        </DialogHeader>
         {children}
-      </div>
-    </>
+        {footer && <DialogFooter className="-mx-6 -mb-6 px-6">{footer}</DialogFooter>}
+      </DialogContent>
+    </DialogRoot>
   );
 }
 
@@ -75,95 +97,124 @@ export function DrillDialog({ isAdmin, onClose }: { isAdmin: boolean; onClose: (
   };
 
   return (
-    <Dialog title="Flood drill" onClose={onClose}>
-      <p>
-        The drill sends realistic, messy help messages to this organisation, including the same household writing
-        twice. Simulated field teams deliver when they arrive, and two teams report {config?.area.flood_road} flooded
-        about a minute in.
-      </p>
-      <div className="field">
-        <label htmlFor="scenario">Scenario</label>
-        <select id="scenario" className="input" value={scenario} onChange={(e) => setScenario(e.target.value as "demo" | "flood")}>
-          <option value="demo">Demo script: Kumar duplicate, unserved street, Das family, road flood</option>
-          <option value="flood">Random flood: messages only</option>
-        </select>
+    <Dialog
+      title="Flood"
+      serif="drill"
+      onClose={onClose}
+      description={
+        <>
+          The drill sends realistic, messy help messages to this organisation, including the same household writing twice.
+          Simulated field teams deliver when they arrive, and two teams report {config?.area.flood_road} flooded about a
+          minute in.
+        </>
+      }
+      footer={
+        <>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              className="mr-auto text-destructive"
+              disabled={busy}
+              onClick={() => run(() => api.post("/api/sim/reset"), () => "This organisation's memory is empty again.")}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              Erase this organisation's memory
+            </Button>
+          )}
+          {status?.running ? (
+            <Button variant="destructive" disabled={busy} onClick={() => run(() => api.post("/api/sim/stop"))}>
+              <SquareIcon data-icon="inline-start" />
+              Stop the drill
+            </Button>
+          ) : (
+            <Button
+              disabled={busy}
+              onClick={() => run(() => api.post("/api/sim/start", { rate_per_min: rate, auto_field: autoField, scenario }))}
+            >
+              <PlayIcon data-icon="inline-start" />
+              Start the drill
+            </Button>
+          )}
+        </>
+      }
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="scenario">Scenario</FieldLabel>
+          <NativeSelect id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value as "demo" | "flood")}>
+            <NativeSelectOption value="demo">Demo script: Kumar duplicate, unserved street, Das family, road flood</NativeSelectOption>
+            <NativeSelectOption value="flood">Random flood: messages only</NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        <Field>
+          <div className="flex items-center justify-between">
+            <FieldLabel htmlFor="rate">Messages per minute</FieldLabel>
+            <span className="num text-sm">{rate}</span>
+          </div>
+          <Slider
+            id="rate"
+            min={5}
+            max={240}
+            step={5}
+            value={[rate]}
+            onValueChange={(v) => setRate(Array.isArray(v) ? v[0] : (v as number))}
+            aria-label="Messages per minute"
+          />
+        </Field>
+        <Field orientation="horizontal">
+          <Checkbox id="auto-field" checked={autoField} onCheckedChange={(c) => setAutoField(c === true)} />
+          <FieldLabel htmlFor="auto-field" className="font-normal">
+            Simulate field teams delivering help
+          </FieldLabel>
+        </Field>
+      </FieldGroup>
+
+      <div className="flex flex-col gap-1.5 rounded-xl bg-muted p-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <span className={cn("size-1.5 rounded-full", status?.running ? "bg-success" : "bg-muted-foreground")} aria-hidden="true" />
+          {status ? `${status.running ? "Running" : "Stopped"} · ${status.sent} messages sent` : "Checking…"}
+        </div>
+        {status?.log?.slice(-4).map((l, i) => (
+          <p key={i} className="num text-[10.5px] text-muted-foreground">
+            {l}
+          </p>
+        ))}
       </div>
-      <div className="field">
-        <label htmlFor="rate">Messages per minute: {rate}</label>
-        <input id="rate" type="range" min={5} max={240} step={5} value={rate} onChange={(e) => setRate(+e.target.value)} />
-      </div>
-      <label className="toggle">
-        <input type="checkbox" checked={autoField} onChange={(e) => setAutoField(e.target.checked)} />
-        Simulate field teams delivering help
-      </label>
-      <div className="row">
-        {status?.running ? (
-          <button type="button" className="btn hazard" disabled={busy} onClick={() => run(() => api.post("/api/sim/stop"))}>
-            Stop the drill
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn primary"
+
+      <Separator />
+      <div className="flex flex-col gap-2">
+        <h3 className="font-medium">Load test</h3>
+        <p className="text-sm text-muted-foreground">
+          Send many messages at once and watch the agents drain the queue without handling any request twice.
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            className="num w-28"
+            type="number"
+            min={10}
+            max={5000}
+            value={burst}
+            onChange={(e) => setBurst(+e.target.value)}
+            aria-label="Number of messages"
+          />
+          <Button
+            variant="outline"
             disabled={busy}
             onClick={() =>
-              run(() => api.post("/api/sim/start", { rate_per_min: rate, auto_field: autoField, scenario }))
+              run(
+                () => api.post<{ count: number; ms: number; per_min: number }>("/api/sim/burst", { count: burst }),
+                (r) => {
+                  const x = r as { count: number; ms: number; per_min: number };
+                  return `Accepted ${x.count} messages in ${x.ms} ms (${x.per_min.toLocaleString()} per minute).`;
+                },
+              )
             }
           >
-            Start the drill
-          </button>
-        )}
-        <span className="result-line num">
-          {status ? `${status.running ? "Running" : "Stopped"}, ${status.sent} messages sent` : "Checking…"}
-        </span>
-      </div>
-      {status?.log?.length ? (
-        <ul className="result-line" style={{ margin: 0, paddingLeft: 18 }}>
-          {status.log.map((l, i) => (
-            <li key={i}>{l}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      <hr style={{ border: 0, borderTop: "1px solid var(--rule)", width: "100%", margin: 0 }} />
-      <h2 style={{ fontSize: "var(--step-1)" }}>Load test</h2>
-      <p>Send many messages at once and watch the agents drain the queue without handling any request twice.</p>
-      <div className="row">
-        <input
-          className="input num"
-          style={{ width: 110 }}
-          type="number"
-          min={10}
-          max={5000}
-          value={burst}
-          onChange={(e) => setBurst(+e.target.value)}
-          aria-label="Number of messages"
-        />
-        <button
-          type="button"
-          className="btn"
-          disabled={busy}
-          onClick={() =>
-            run(
-              () => api.post<{ count: number; ms: number; per_min: number }>("/api/sim/burst", { count: burst }),
-              (r) => {
-                const x = r as { count: number; ms: number; per_min: number };
-                return `Accepted ${x.count} messages in ${x.ms} ms (${x.per_min.toLocaleString()} per minute).`;
-              },
-            )
-          }
-        >
-          Send {burst} messages
-        </button>
-      </div>
-
-      {isAdmin && (
-        <>
-          <hr style={{ border: 0, borderTop: "1px solid var(--rule)", width: "100%", margin: 0 }} />
-          <div className="row">
-            <button
-              type="button"
-              className="btn"
+            Send {burst} messages
+          </Button>
+          {isAdmin && (
+            <Button
+              variant="ghost"
               disabled={busy}
               onClick={() =>
                 run(() => api.post<{ reopened: string[] }>("/api/sim/reset-roads"), (r) => {
@@ -173,19 +224,11 @@ export function DrillDialog({ isAdmin, onClose }: { isAdmin: boolean; onClose: (
               }
             >
               Reopen all roads
-            </button>
-            <button
-              type="button"
-              className="btn hazard"
-              disabled={busy}
-              onClick={() => run(() => api.post("/api/sim/reset"), () => "This organisation's memory is empty again.")}
-            >
-              Erase this organisation's memory
-            </button>
-          </div>
-        </>
-      )}
-      {result && <p className="result-line">{result}</p>}
+            </Button>
+          )}
+        </div>
+      </div>
+      {result && <ResultLine>{result}</ResultLine>}
     </Dialog>
   );
 }
@@ -226,38 +269,47 @@ export function BriefingDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog title="Shift handover" onClose={onClose}>
-      <div className="row">
-        <button type="button" className="btn primary" disabled={busy} onClick={write}>
-          {busy ? "Writing the briefing…" : "Write a briefing now"}
-        </button>
-        {list && list.length > 1 && (
-          <select
-            className="input"
-            style={{ width: "auto" }}
-            aria-label="Earlier briefings"
-            value={current?.id}
-            onChange={(e) => setCurrent(list.find((b) => b.id === e.target.value) ?? null)}
-          >
-            {list.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.shift}, {clock(b.at)}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-      {error && <p className="error">{error}</p>}
+    <Dialog
+      title="Shift"
+      serif="handover"
+      onClose={onClose}
+      wide
+      description="The Shift Coordinator assembles a briefing from the graph. It also writes one at each shift change."
+      footer={
+        <>
+          {list && list.length > 1 && (
+            <NativeSelect
+              className="mr-auto w-auto"
+              aria-label="Earlier briefings"
+              value={current?.id}
+              onChange={(e) => setCurrent(list.find((b) => b.id === e.target.value) ?? null)}
+            >
+              {list.map((b) => (
+                <NativeSelectOption key={b.id} value={b.id}>
+                  {b.shift}, {clock(b.at)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+          <Button disabled={busy} onClick={write}>
+            <FileTextIcon data-icon="inline-start" />
+            {busy ? "Writing the briefing…" : "Write a briefing now"}
+          </Button>
+        </>
+      }
+    >
+      {error && <ErrorLine>{error}</ErrorLine>}
       {current ? (
-        <div>
-          <Md text={current.text} />
-          <p className="result-line">
-            {current.by === "rules" ? "Assembled from the graph" : `Written by ${current.by}`} at {clock(current.at)}. The Shift
-            Coordinator also writes one automatically at each shift change.
-          </p>
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border bg-card p-5 text-sm leading-relaxed [&_h2]:mt-3 [&_h2]:text-lg [&_h2]:font-medium [&_h2]:first:mt-0 [&_h3]:mt-3 [&_h3]:font-medium [&_li]:ml-5 [&_li]:list-disc [&_p]:mt-2 [&_ul]:mt-2">
+            <Md text={current.text} />
+          </div>
+          <span className="eyebrow">
+            [ {current.by === "rules" ? "Assembled from the graph" : `Written by ${current.by}`} at {clock(current.at)} ]
+          </span>
         </div>
       ) : (
-        list && <p>No briefing yet for this organisation.</p>
+        list && <ResultLine>No briefing yet for this organisation.</ResultLine>
       )}
     </Dialog>
   );
@@ -269,32 +321,13 @@ export function MessageDialog({ onClose }: { onClose: () => void }) {
   const [sent, setSent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <Dialog title="Add a helpline message" onClose={onClose}>
-      <p>Paste or type a message exactly as it came in. The Intake agent reads Hinglish and typos.</p>
-      <div className="field">
-        <label htmlFor="msg">Message</label>
-        <textarea
-          id="msg"
-          className="input"
-          rows={4}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="e.g. Das family ward 14 near water tanki, 6 log, nani bimar hai"
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="ch">Came in by</label>
-        <select id="ch" className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
-          <option value="phone">Phone call</option>
-          <option value="whatsapp">WhatsApp</option>
-          <option value="social">Social media</option>
-          <option value="sms">SMS</option>
-        </select>
-      </div>
-      <div className="row">
-        <button
-          type="button"
-          className="btn primary"
+    <Dialog
+      title="Add a helpline"
+      serif="message"
+      onClose={onClose}
+      description="Paste or type a message exactly as it came in. The Intake agent reads Hinglish and typos."
+      footer={
+        <Button
           disabled={busy || text.trim().length < 3}
           onClick={async () => {
             setBusy(true);
@@ -308,9 +341,31 @@ export function MessageDialog({ onClose }: { onClose: () => void }) {
           }}
         >
           Add message
-        </button>
-        {sent && <span className="result-line">Added as {sent}. Watch it move through the pipeline.</span>}
-      </div>
+        </Button>
+      }
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="msg">Message</FieldLabel>
+          <Textarea
+            id="msg"
+            rows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="e.g. Das family ward 14 near water tanki, 6 log, nani bimar hai"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="ch">Came in by</FieldLabel>
+          <NativeSelect id="ch" value={channel} onChange={(e) => setChannel(e.target.value)}>
+            <NativeSelectOption value="phone">Phone call</NativeSelectOption>
+            <NativeSelectOption value="whatsapp">WhatsApp</NativeSelectOption>
+            <NativeSelectOption value="social">Social media</NativeSelectOption>
+            <NativeSelectOption value="sms">SMS</NativeSelectOption>
+          </NativeSelect>
+          {sent && <FieldDescription>Added as {sent}. Watch it move through the pipeline.</FieldDescription>}
+        </Field>
+      </FieldGroup>
     </Dialog>
   );
 }

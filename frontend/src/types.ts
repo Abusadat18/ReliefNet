@@ -192,6 +192,9 @@ export interface Lesson {
   by: string;
   evidence: string[];
   used: number;
+  /** A coordinator's decision: "on" applies the lesson, "off" dismisses it, null leaves it to its confidence. */
+  override: "on" | "off" | null;
+  override_by: string | null;
 }
 
 export interface TimelineStep {
@@ -230,6 +233,10 @@ export interface Assignment {
   eta_min: number;
   roads: string[];
   summary: string;
+  lat: number | null;
+  lon: number | null;
+  /** The number to call. Present only when the server sets FIELD_SHOW_PHONE. */
+  call?: string | null;
 }
 
 export interface ChatTurn {

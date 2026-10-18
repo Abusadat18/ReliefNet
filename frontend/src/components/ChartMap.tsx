@@ -1,3 +1,4 @@
+import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { MapLayers, pathOf, type LayerProps } from "./MapLayers";
 
@@ -123,6 +124,14 @@ export function ChartMap(props: LayerProps) {
     drag.current = null;
     setDragging(false);
   };
+  const zoomTo = (lat: number, lon: number) => {
+    const [x, y] = P(lat, lon);
+    setView((v) => {
+      const w = Math.max(v.w / 2.5, 600);
+      const h = (v.h * w) / v.w;
+      return { x: x - w / 2, y: y - h / 2, w, h };
+    });
+  };
   const onWheel = (e: WheelEvent) => zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
 
   const path = (pts: [number, number][], close = false) => pathOf(P, pts, close);
@@ -167,18 +176,23 @@ export function ChartMap(props: LayerProps) {
             </text>
           );
         })}
-        <MapLayers {...props} P={P} u={u} showLabels={showLabels} />
+        <MapLayers {...props} P={P} u={u} showLabels={showLabels} onZoomTo={zoomTo} />
       </svg>
-      <div className="neatline" aria-hidden="true" />
-      <div className="zoom">
-        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(1 / 1.4)}>
-          +
+      <div className="absolute top-4 right-4 z-10 flex w-11 flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
+        <button type="button" aria-label="Zoom in" onClick={() => zoomAt(1 / 1.4)} className="grid h-9 place-items-center border-b hover:bg-muted">
+          <PlusIcon className="size-4" />
         </button>
-        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(1.4)}>
-          −
+        <button type="button" aria-label="Zoom out" onClick={() => zoomAt(1.4)} className="grid h-9 place-items-center border-b hover:bg-muted">
+          <MinusIcon className="size-4" />
         </button>
-        <button type="button" aria-label="Show the whole area" onClick={() => setView(full)} style={{ fontSize: 13 }}>
-          ⤢
+        <button
+          type="button"
+          aria-label="Show the whole area"
+          title="Show the whole area"
+          onClick={() => setView(full)}
+          className="grid h-9 place-items-center hover:bg-muted"
+        >
+          <MaximizeIcon className="size-4" />
         </button>
       </div>
     </>

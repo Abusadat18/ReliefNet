@@ -1,0 +1,223 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter-tight";
+@import "@fontsource-variable/newsreader";
+@import "@fontsource-variable/newsreader/wght-italic.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design.pen v2: cream canvas, slate-teal ink, rain-blue accent. Colour beyond that is for urgency only. */
+:root,
+.force-light {
+  --background: #f8f6f1;
+  --foreground: #141d21;
+  --card: #fdfcf9;
+  --card-foreground: #141d21;
+  --popover: #ffffff;
+  --popover-foreground: #141d21;
+  --primary: #2c4d5a;
+  --primary-foreground: #ffffff;
+  --secondary: #eae6dc;
+  --secondary-foreground: #141d21;
+  --muted: #efece5;
+  --muted-foreground: #62686a;
+  --accent: #eae6dc;
+  --accent-foreground: #141d21;
+  --destructive: #d92d20;
+  --border: #e2ddd3;
+  --input: #d3cdc1;
+  --ring: #2c4d5a;
+  --radius: 0.5rem;
+
+  --critical: #d92d20;
+  --high: #e8590c;
+  --medium: #c99a06;
+  --low: #5b6672;
+  --success: #12805c;
+  --warning: #b54708;
+  --info: #2e6f8e;
+  --critical-soft: #f8e6e2;
+  --high-soft: #f8ece1;
+  --medium-soft: #f6f0da;
+  --success-soft: #e4efe8;
+  --info-soft: #e2edf2;
+  --rain: #b9dcf2;
+  --slate: #141d21;
+  --teal: #2c4d5a;
+  --cream: #f2efe9;
+  --ink-soft: #2b2e31;
+
+  --chart-1: #2c4d5a;
+  --chart-2: #2e6f8e;
+  --chart-3: #b9dcf2;
+  --chart-4: #c99a06;
+  --chart-5: #d92d20;
+  --sidebar: #fdfcf9;
+  --sidebar-foreground: #141d21;
+  --sidebar-primary: #2c4d5a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eae6dc;
+  --sidebar-accent-foreground: #141d21;
+  --sidebar-border: #e2ddd3;
+  --sidebar-ring: #2c4d5a;
+}
+
+.dark {
+  --background: #141d21;
+  --foreground: #eef1f2;
+  --card: #19242a;
+  --card-foreground: #eef1f2;
+  --popover: #19242a;
+  --popover-foreground: #eef1f2;
+  --primary: #b9dcf2;
+  --primary-foreground: #141d21;
+  --secondary: #22313a;
+  --secondary-foreground: #eef1f2;
+  --muted: #1d2a30;
+  --muted-foreground: #8f9a9f;
+  --accent: #22313a;
+  --accent-foreground: #eef1f2;
+  --destructive: #f04438;
+  --border: #26343b;
+  --input: #33444d;
+  --ring: #b9dcf2;
+
+  --critical: #f04438;
+  --high: #f7782f;
+  --medium: #e8b931;
+  --low: #8c97a3;
+  --success: #2fbf8a;
+  --warning: #f79009;
+  --info: #8cc3e6;
+  --critical-soft: #2b1916;
+  --high-soft: #2a1d13;
+  --medium-soft: #262113;
+  --success-soft: #15261e;
+  --info-soft: #1b2e38;
+  --ink-soft: #c9d3d6;
+
+  --sidebar: #19242a;
+  --sidebar-foreground: #eef1f2;
+  --sidebar-primary: #b9dcf2;
+  --sidebar-primary-foreground: #141d21;
+  --sidebar-accent: #22313a;
+  --sidebar-accent-foreground: #eef1f2;
+  --sidebar-border: #26343b;
+  --sidebar-ring: #b9dcf2;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-display: "Inter Tight Variable", "Inter Variable", ui-sans-serif, sans-serif;
+  --font-serif: "Newsreader Variable", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-critical: var(--critical);
+  --color-high: var(--high);
+  --color-medium: var(--medium);
+  --color-low: var(--low);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-critical-soft: var(--critical-soft);
+  --color-high-soft: var(--high-soft);
+  --color-medium-soft: var(--medium-soft);
+  --color-success-soft: var(--success-soft);
+  --color-info-soft: var(--info-soft);
+  --color-rain: var(--rain);
+  --color-slate: var(--slate);
+  --color-teal: var(--teal);
+  --color-cream: var(--cream);
+  --color-ink-soft: var(--ink-soft);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 2.5);
+  --radius-4xl: 9999px;
+}
+
+@theme {
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 2px 10px rgb(20 29 33 / 0.08);
+  --shadow-md: 0 4px 16px rgb(20 29 33 / 0.12);
+  --shadow-lg: 0 8px 24px rgb(20 29 33 / 0.16);
+}
+
+/* Bracket eyebrows: "[ Shift status · live ]". */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+
+/* The italic serif word that pairs with a regular sans heading. */
+@utility accent-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.12em;
+  letter-spacing: -0.01em;
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans antialiased;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

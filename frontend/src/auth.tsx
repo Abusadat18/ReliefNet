@@ -156,6 +156,15 @@ function ClerkBridge({ config, children }: { config: AppConfig; children: ReactN
   );
 }
 
+/** The screen while the session loads, or a setup problem that stops the app. */
+export function Boot({ children }: { children?: ReactNode }) {
+  return (
+    <div className="grid min-h-dvh place-items-center bg-background p-6" aria-busy={!children}>
+      {children && <p className="max-w-md text-center text-sm text-muted-foreground">{children}</p>}
+    </div>
+  );
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -167,21 +176,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((e) => setFailed(String(e.message ?? e)));
   }, []);
 
-  if (failed)
-    return (
-      <div className="boot">
-        <p>ReliefNet cannot reach its server ({failed}). Start the API on port 8000, then reload this page.</p>
-      </div>
-    );
-  if (!config) return <div className="boot" aria-busy="true" />;
+  if (failed) return <Boot>ReliefNet cannot reach its server ({failed}). Start the API on port 8000, then reload this page.</Boot>;
+  if (!config) return <Boot />;
 
   if (config.auth_mode === "clerk") {
-    if (!CLERK_KEY)
-      return (
-        <div className="boot">
-          <p>The server uses Clerk sign-in, but this app has no VITE_CLERK_PUBLISHABLE_KEY. Add it to frontend/.env.</p>
-        </div>
-      );
+    if (!CLERK_KEY) return <Boot>The server uses Clerk sign-in, but this app has no VITE_CLERK_PUBLISHABLE_KEY. Add it to frontend/.env.</Boot>;
     return (
       <ClerkProvider publishableKey={CLERK_KEY}>
         <ClerkBridge config={config}>{children}</ClerkBridge>

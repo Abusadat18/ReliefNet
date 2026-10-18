@@ -1,8 +1,17 @@
+import { PlusIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useResource } from "../hooks";
 import type { Landmark, LandmarkList } from "../types";
 import { Dialog } from "./Dialogs";
+import { ErrorLine, ResultLine } from "./kit";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { cn } from "@/lib/utils";
 
 const SOURCE_LABEL: Record<string, string> = { hand: "Area list", osm: "OpenStreetMap", app: "Added here" };
 const MAX_ROWS = 60;
@@ -36,11 +45,18 @@ export function PlacesDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog title="Places and local names" onClose={onClose} wide>
-      <p>
-        Intake finds the place in a message by the name of a landmark or by a local name, for example “sarkari
-        aspatal”. Add the names that people in your area use. All organisations share these places.
-      </p>
+    <Dialog
+      title="Places and"
+      serif="local names"
+      onClose={onClose}
+      wide
+      description={
+        <>
+          Intake finds the place in a message by the name of a landmark or by a local name, for example “sarkari aspatal”.
+          Add the names that people in your area use. All organisations share these places.
+        </>
+      }
+    >
       {adding ? (
         <NewLandmarkForm
           kinds={list.data?.kinds ?? []}
@@ -55,63 +71,68 @@ export function PlacesDialog({ onClose }: { onClose: () => void }) {
         />
       ) : (
         <>
-          <div className="row">
-            <div className="field places-search">
-              <label htmlFor="places-q">Search landmarks</label>
-              <input
-                id="places-q"
-                className="input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type a name, a local name or a ward number"
-                autoComplete="off"
-              />
-            </div>
-            <button type="button" className="btn" onClick={() => setAdding(true)}>
-              Add a new landmark
-            </button>
+          <div className="flex items-end gap-2">
+            <Field className="flex-1">
+              <FieldLabel htmlFor="places-q">Search landmarks</FieldLabel>
+              <InputGroup>
+                <InputGroupAddon>
+                  <SearchIcon />
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="places-q"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Type a name, a local name or a ward number"
+                  autoComplete="off"
+                />
+              </InputGroup>
+            </Field>
+            <Button variant="outline" onClick={() => setAdding(true)}>
+              <PlusIcon data-icon="inline-start" />
+              New landmark
+            </Button>
           </div>
-          {list.error && <p className="error">{list.error}</p>}
+          {list.error && <ErrorLine>{list.error}</ErrorLine>}
           {current && (
-            <AliasForm
-              landmark={current}
-              onDone={(alias) => done(`“${alias}” now finds ${current.name}. Intake uses it for the next message.`)}
-            />
+            <AliasForm landmark={current} onDone={(alias) => done(`“${alias}” now finds ${current.name}. Intake uses it for the next message.`)} />
           )}
-          {result && <p className="result-line">{result}</p>}
-          <div className="places-list" role="listbox" aria-label="Landmarks">
+          {result && <ResultLine>{result}</ResultLine>}
+          <div className="flex max-h-80 flex-col gap-1 overflow-y-auto rounded-xl border p-1" role="listbox" aria-label="Landmarks">
             {shown.slice(0, MAX_ROWS).map((l) => (
               <button
                 key={l.id}
                 type="button"
                 role="option"
                 aria-selected={l.id === picked}
-                className={`place-row${l.id === picked ? " on" : ""}`}
+                className={cn(
+                  "flex flex-col gap-0.5 rounded-lg px-3 py-2 text-left hover:bg-muted",
+                  l.id === picked && "bg-info-soft hover:bg-info-soft",
+                )}
                 onClick={() => {
                   setPicked(l.id);
                   setResult(null);
                 }}
               >
-                <span className="place-name">
-                  <b>{l.name}</b>
-                  <span className="muted">
+                <span className="flex flex-wrap items-center gap-2">
+                  <b className="text-sm font-medium">{l.name}</b>
+                  <span className="text-xs text-muted-foreground">
                     Ward {l.ward}, {l.kind}
                   </span>
-                  <span className={`chip src-${l.source ?? "hand"}`}>{SOURCE_LABEL[l.source ?? "hand"]}</span>
+                  <Badge variant="outline">{SOURCE_LABEL[l.source ?? "hand"]}</Badge>
                 </span>
-                {l.aliases.length > 0 && <span className="place-aliases">{l.aliases.join(", ")}</span>}
+                {l.aliases.length > 0 && <span className="text-xs text-muted-foreground">{l.aliases.join(", ")}</span>}
               </button>
             ))}
-            {list.data && shown.length === 0 && <p className="result-line">No landmark has this name.</p>}
+            {list.data && shown.length === 0 && <ResultLine className="px-3 py-2">No landmark has this name.</ResultLine>}
           </div>
-          <p className="result-line">
+          <ResultLine className="text-xs">
             {list.data
               ? shown.length > MAX_ROWS
                 ? `The list shows ${MAX_ROWS} of ${shown.length} landmarks. Type more letters to find a landmark.`
                 : `${shown.length} of ${all.length} landmarks.`
               : "Loading the landmarks…"}
             {hasOsm && " Places marked OpenStreetMap: © OpenStreetMap contributors (ODbL)."}
-          </p>
+          </ResultLine>
         </>
       )}
     </Dialog>
@@ -130,9 +151,7 @@ function AliasForm({ landmark, onDone }: { landmark: Landmark; onDone: (alias: s
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<Landmark>(`/api/region/landmarks/${encodeURIComponent(landmark.id)}/aliases`, {
-        alias: text,
-      });
+      const r = await api.post<Landmark>(`/api/region/landmarks/${encodeURIComponent(landmark.id)}/aliases`, { alias: text });
       setAlias("");
       onDone(r.aliases[r.aliases.length - 1] ?? text);
     } catch (e) {
@@ -143,28 +162,28 @@ function AliasForm({ landmark, onDone }: { landmark: Landmark; onDone: (alias: s
   };
 
   return (
-    <form className="place-form" onSubmit={submit}>
-      <div className="field">
-        <label htmlFor="alias">Add a local name for {landmark.name}</label>
-        <div className="row">
-          <input
+    <form onSubmit={submit} className="rounded-xl bg-muted p-3">
+      <Field>
+        <FieldLabel htmlFor="alias">Add a local name for {landmark.name}</FieldLabel>
+        <div className="flex gap-2">
+          <Input
             id="alias"
-            className="input"
+            className="bg-background"
             value={alias}
             maxLength={60}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="For example: bada mandir"
             autoComplete="off"
           />
-          <button type="submit" className="btn primary" disabled={busy || alias.trim().length < 2}>
+          <Button type="submit" disabled={busy || alias.trim().length < 2}>
             Add the name
-          </button>
+          </Button>
         </div>
-      </div>
-      <span className="result-line">
-        Do not add a word that many places share, such as “mandir” alone. Intake then cannot tell the places apart.
-      </span>
-      {error && <p className="error">{error}</p>}
+        <FieldDescription>
+          Do not add a word that many places share, such as “mandir” alone. Intake then cannot tell the places apart.
+        </FieldDescription>
+      </Field>
+      {error && <ErrorLine>{error}</ErrorLine>}
     </form>
   );
 }
@@ -225,64 +244,60 @@ function NewLandmarkForm({
   const ready = name.trim().length >= 3 && lat !== "" && lon !== "" && !Number.isNaN(+lat) && !Number.isNaN(+lon);
 
   return (
-    <form className="place-form" onSubmit={submit}>
-      <h3>Add a new landmark</h3>
-      <div className="field">
-        <label htmlFor="lm-name">Name</label>
-        <input id="lm-name" className="input" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="field">
-        <label htmlFor="lm-kind">Kind</label>
-        <select id="lm-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-          {(kinds.length ? kinds : ["landmark"]).map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor="lm-aliases">Local names, separated by commas</label>
-        <input
-          id="lm-aliases"
-          className="input"
-          value={aliases}
-          onChange={(e) => setAliases(e.target.value)}
-          placeholder="For example: pani tanki, water tank"
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="lm-near">Position: start at a landmark nearby</label>
-        <select id="lm-near" className="input" value={near} onChange={(e) => pickNear(e.target.value)}>
-          <option value="">Select a landmark</option>
-          {sorted.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name} (ward {l.ward})
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="row">
-        <div className="field">
-          <label htmlFor="lm-lat">Latitude</label>
-          <input id="lm-lat" className="input num" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} />
+    <form onSubmit={submit} className="flex flex-col gap-5">
+      <h3 className="text-base font-medium">Add a new landmark</h3>
+      <FieldGroup>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="lm-name">Name</FieldLabel>
+            <Input id="lm-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="lm-kind">Kind</FieldLabel>
+            <NativeSelect id="lm-kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+              {(kinds.length ? kinds : ["landmark"]).map((k) => (
+                <NativeSelectOption key={k} value={k}>
+                  {k}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
         </div>
-        <div className="field">
-          <label htmlFor="lm-lon">Longitude</label>
-          <input id="lm-lon" className="input num" inputMode="decimal" value={lon} onChange={(e) => setLon(e.target.value)} />
+        <Field>
+          <FieldLabel htmlFor="lm-aliases">Local names, separated by commas</FieldLabel>
+          <Input id="lm-aliases" value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="For example: pani tanki, water tank" />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="lm-near">Position: start at a landmark nearby</FieldLabel>
+          <NativeSelect id="lm-near" value={near} onChange={(e) => pickNear(e.target.value)}>
+            <NativeSelectOption value="">Select a landmark</NativeSelectOption>
+            {sorted.map((l) => (
+              <NativeSelectOption key={l.id} value={l.id}>
+                {l.name} (ward {l.ward})
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field>
+            <FieldLabel htmlFor="lm-lat">Latitude</FieldLabel>
+            <Input id="lm-lat" className="num" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="lm-lon">Longitude</FieldLabel>
+            <Input id="lm-lon" className="num" inputMode="decimal" value={lon} onChange={(e) => setLon(e.target.value)} />
+          </Field>
         </div>
-      </div>
-      <span className="result-line">
-        Change the latitude and longitude to move the point. The point must be inside a ward of the area.
-      </span>
-      {error && <p className="error">{error}</p>}
-      <div className="row">
-        <button type="submit" className="btn primary" disabled={busy || !ready}>
-          Add the landmark
-        </button>
-        <button type="button" className="btn quiet" onClick={onCancel}>
+        <FieldDescription>Change the latitude and longitude to move the point. The point must be inside a ward of the area.</FieldDescription>
+      </FieldGroup>
+      {error && <ErrorLine>{error}</ErrorLine>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
+        <Button type="submit" disabled={busy || !ready}>
+          Add the landmark
+        </Button>
       </div>
     </form>
   );
