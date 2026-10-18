@@ -124,11 +124,6 @@ TEAM_BASES = {
     ],
 }
 
-DEFAULT_TEAMS = [
-    _base("Team 1", ["food", "water", "medicine", "blankets"], "Gravity Mall", 3),
-    _base("Team 2", ["boat", "evacuation", "first_aid"], "Hanuman Mandir", 2),
-]
-
 DRILL = DrillScript(
     messages=[
         (0, "whatsapp", "pls help 5 ppl stuck near Shiv mandir ward 11 Kankarbagh, dadi needs BP medicine, paani ghar mein aa raha hai", "KUMAR"),

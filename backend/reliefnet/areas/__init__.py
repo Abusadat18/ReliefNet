@@ -5,15 +5,16 @@ team bases, and the names the flood drill uses. `AREA` in the settings
 selects one; the region graph holds one area at a time.
 
 To add an area, copy `patna.py`, change the box and the local names, then run
-`python -m reliefnet.areas.import_osm <name>` to download its roads."""
+`python -m reliefnet.areas.import_osm <name>` to download its roads, and
+`python -m reliefnet.areas.import_osm <name> --places` for its named places."""
 from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import math
 from dataclasses import dataclass, field
 from functools import lru_cache
-from pathlib import Path
 from types import ModuleType
 
 AREAS = {
@@ -105,15 +106,35 @@ def module(name: str | None = None) -> ModuleType:
 
 @lru_cache
 def region(name: str | None = None) -> Region:
-    return module(name).build_region()
+    from . import places
+
+    m = module(name)
+    reg = m.build_region()
+    osm = places.load(m)
+    if osm:
+        reg.attribution = f"{reg.attribution}. {places.ATTRIBUTION}" if reg.attribution else places.ATTRIBUTION
+    blocked = [reg.title, *(w["name"] for w in reg.wards), *{r.name for r in reg.roads}]
+    reg.landmarks = places.merge(reg.landmarks, osm, reg.wards, blocked)
+    return reg
+
+
+def _digest(data) -> str:
+    return hashlib.sha1(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
 def version(name: str | None = None) -> str:
-    """Changes when anything in the area changes: a new OSM import, a new landmark alias."""
-    m = module(name)
-    snap = getattr(m, "SNAPSHOT", None)
-    raw = (snap.read_bytes() if snap else b"") + Path(m.__file__).read_bytes()
-    return hashlib.sha1(raw).hexdigest()[:12]
+    """Changes when the roads, wards or shelters change. Landmarks have their own `landmark_version`,
+    so a new landmark or alias does not rebuild the roads and lose their flood state."""
+    reg = region(name)
+    return _digest({"roads": [r.__dict__ for r in reg.roads], "junctions": [j.__dict__ for j in reg.junctions],
+                    "wards": reg.wards, "shelters": reg.shelters, "water": [reg.water_areas, reg.water_lines],
+                    "rail": reg.rail})
+
+
+def landmark_version(name: str | None = None) -> str:
+    """Changes when a hand-written landmark or an imported OpenStreetMap place changes."""
+    reg = region(name)
+    return _digest({"landmarks": reg.landmarks, "attribution": reg.attribution})
 
 
 def junction_version(name: str | None = None) -> str:
@@ -146,7 +167,7 @@ def nearest_junction(reg: Region, lat: float, lon: float) -> Junction:
 
 def team_bases(slug: str, name: str | None = None) -> list[TeamBase]:
     m = module(name)
-    return m.TEAM_BASES.get(slug, m.DEFAULT_TEAMS)
+    return m.TEAM_BASES.get(slug, [])
 
 
 def drill(name: str | None = None) -> DrillScript:

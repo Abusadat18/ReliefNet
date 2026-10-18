@@ -63,7 +63,7 @@ docker compose -p reliefnet up -d --build
 1. Open http://localhost:8080 and sign up.
 2. Create your organisation, for example "Red Cross Ganga Nagar". You become its **Admin**.
 
-ReliefNet creates the organisation's graph the first time you open it, with two starter teams.
+ReliefNet creates the organisation's graph the first time you open it. The graph has no teams. Open **Teams** on the operations screen and add your first team.
 
 ## 4. Stop strangers from creating organisations
 

@@ -112,6 +112,17 @@ def test_typed_ward_and_landmark_name_are_understood():
     assert (r.draft.ward, r.draft.landmark, r.draft.step) == (12, "Shiv Mandir", "detail")
 
 
+def test_a_ward_with_many_landmarks_shows_few_buttons_but_accepts_any_typed_name():
+    many = {12: [f"Place {i}" for i in range(30)]}
+    c = f.Ctx(landmarks=many, now=1000.0)
+    r = f.start(c, lang="en")
+    r = run(r.draft, tap("whose:self"), tap("loc:manual"), tap("ward:12"), c=c)
+    buttons = [b.id for b in r.replies[0].buttons]
+    assert buttons == [f"lm:{i}" for i in range(f.LANDMARK_BUTTONS)] + ["lm:none"]
+    r = run(r.draft, say("place 25"), c=c)
+    assert (r.draft.landmark, r.draft.step) == ("Place 25", "detail")
+
+
 def test_ward_without_landmarks_goes_straight_to_details():
     r = f.start(ctx(), lang="en")
     r = run(r.draft, tap("whose:self"), tap("loc:manual"), tap("ward:13"))

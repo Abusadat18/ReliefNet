@@ -2,6 +2,8 @@
 
     python -m reliefnet.seed            # create anything missing
     python -m reliefnet.seed --reset    # wipe org data and region state, then reseed
+
+The local names that coordinators add (see `gazetteer.py`) stay after a reset.
 """
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ import asyncio
 import json
 import logging
 
-from . import areas, db, events, orgs
+from . import areas, db, events, gazetteer, orgs
 from .config import get_settings
 from .db import REGION_GRAPH, org_graph_name, query
 
@@ -33,6 +35,7 @@ ORG_INDEXES = [
 REGION_INDEXES = [
     "CREATE INDEX FOR (n:Junction) ON (n.id)",
     "CREATE INDEX FOR (n:Landmark) ON (n.name)",
+    "CREATE INDEX FOR (n:Landmark) ON (n.id)",
     "CREATE INDEX FOR ()-[r:ROAD]-() ON (r.name)",
 ]
 
@@ -68,7 +71,7 @@ async def region_meta() -> dict | None:
     meta = {r["k"]: r["v"] for r in rows}
     # A region graph without these keys was made before areas existed: it is Ganga Nagar.
     return {"area": meta.get("area", "ganga_nagar"), "version": meta.get("version", ""),
-            "junctions": meta.get("junctions", "")}
+            "junctions": meta.get("junctions", ""), "landmarks": meta.get("landmarks", "")}
 
 
 async def seed_region(reset: bool = False) -> None:
@@ -76,6 +79,11 @@ async def seed_region(reset: bool = False) -> None:
         have = await region_meta()
         current = have["area"] == get_settings().area and have["version"] == areas.version()
         if not reset and current and await db.scalar(REGION_GRAPH, "MATCH (j:Junction) RETURN count(j)", default=0):
+            # New landmarks or aliases only: keep the roads and their flood state.
+            if have["landmarks"] != areas.landmark_version():
+                await _safe(REGION_GRAPH, "CREATE INDEX FOR (n:Landmark) ON (n.id)")
+                await gazetteer.refresh_landmarks(areas.region(), areas.landmark_version())
+                log.info("region landmarks refreshed: %d landmarks", len(areas.region().landmarks))
             return
         await db.falkor().select_graph(REGION_GRAPH).delete()
     reg = areas.region()
@@ -108,12 +116,8 @@ async def seed_region(reset: bool = False) -> None:
         "UNWIND $rows AS w CREATE (:Ward {num:w.num, name:w.name, bank:w.bank, lat:w.lat, lon:w.lon, polygon:w.polygon})",
         {"rows": [{**w, "polygon": json.dumps(w["polygon"])} for w in reg.wards]},
     )
-    await query(
-        REGION_GRAPH,
-        "UNWIND $rows AS l CREATE (:Landmark {id:l.id, name:l.name, aliases:l.aliases, ward:l.ward, kind:l.kind,"
-        " lat:l.lat, lon:l.lon})",
-        {"rows": reg.landmarks},
-    )
+    await gazetteer.create_landmarks(reg.landmarks)
+    await gazetteer.apply_local_names(reg.name)
     await query(
         REGION_GRAPH,
         "UNWIND $rows AS s CREATE (:Shelter {id:s.id, name:s.name, ward:s.ward, capacity:s.capacity, occupancy:0,"
@@ -124,6 +128,7 @@ async def seed_region(reset: bool = False) -> None:
         "area": reg.name,
         "version": areas.version(),
         "junctions": areas.junction_version(),
+        "landmarks": areas.landmark_version(),
         "title": reg.title,
         "attribution": reg.attribution,
         "water_areas": json.dumps(reg.water_areas),
@@ -132,6 +137,7 @@ async def seed_region(reset: bool = False) -> None:
     }
     await query(REGION_GRAPH, "UNWIND $rows AS m CREATE (:Meta {key:m.k, value:m.v})",
                 {"rows": [{"k": k, "v": v} for k, v in meta.items()]})
+    await gazetteer.bump()
     log.info("region seeded: %s, %d junctions, %d roads", reg.name, len(reg.junctions), len(reg.roads))
 
 
@@ -144,7 +150,12 @@ async def seed_org(slug: str, name: str, reset: bool = False) -> None:
     await ensure_org_schema(slug)
     if await db.scalar(g, "MATCH (t:Team) RETURN count(t)", default=0):
         return
+    # Only the demo organisations named in the area's TEAM_BASES get teams.
+    # Any other organisation starts empty and adds its own teams on the dashboard.
     teams = areas.team_bases(slug)
+    if not teams:
+        log.info("org %s has no seeded teams", slug)
+        return
     reg = areas.region()
     rows = []
     for t in teams:

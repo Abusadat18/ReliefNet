@@ -124,6 +124,9 @@ export function Field() {
         <section className="next-job none">
           <h2>Join your team</h2>
           <p className="line">Choose the team you are working with today. Assignments for that team will appear here.</p>
+          {teams.length === 0 && (
+            <p className="line">Your organisation has no teams yet. Ask an admin to add a team.</p>
+          )}
           <div className="quick" style={{ flexWrap: "wrap" }}>
             {teams.map((t) => (
               <button

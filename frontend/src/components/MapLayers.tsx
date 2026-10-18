@@ -149,9 +149,11 @@ export function MapLayers(props: Props) {
           return (
             <g key={l.id} className="landmark">
               <circle cx={x} cy={y} r={2.5 * u} />
-              <text x={x + 5 * u} y={y - 4 * u} fontSize={10.5 * u}>
-                {l.name}
-              </text>
+              {l.source !== "osm" && (
+                <text x={x + 5 * u} y={y - 4 * u} fontSize={10.5 * u}>
+                  {l.name}
+                </text>
+              )}
             </g>
           );
         })}

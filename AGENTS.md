@@ -24,6 +24,7 @@ Run the backend commands in `backend/` with the virtual environment active.
 | Run one test file | `pytest tests/test_logic.py` |
 | Check an area | `pytest tests/test_areas.py` |
 | Download the roads of an area | `python -m reliefnet.areas.import_osm <area>` |
+| Download the named places of an area | `python -m reliefnet.areas.import_osm <area> --places` |
 | Install the frontend (in `frontend/`) | `npm install` |
 | Start the frontend | `npm run dev` |
 | Type-check and build the frontend | `npm run build` |
@@ -69,6 +70,9 @@ ID prefixes: `M-` message, `R-` request, `F-` family, `O-` observation, `RP-` ro
 |---|---|
 | A graph query that an agent uses | A named function in `memory.py` |
 | A shared graph write (message, road report, delivery, observation) | `field_ops.py` |
+| Team rules (name, supplies, capacity, base) and team writes | `field_ops.py`; the supply list is `SUPPLIES` in `domain.py` |
+| Landmark writes, local names from the app, landmark refresh | `gazetteer.py` |
+| Merge of OpenStreetMap places with `LANDMARKS`, automatic local names | `areas/places.py` |
 | Road state and routing | `routing.py` |
 | A graph node shape | `models.py` (Pydantic) |
 | Fixed lists (needs, urgency, lesson kinds) | `domain.py` |
@@ -85,8 +89,10 @@ Do not put Cypher in an agent file. Put it in `memory.py`, so all agent queries 
 ## Traps
 
 - **A change to `AREA` erases data.** The next start rebuilds the region graph and every organisation's graph, because teams and routes point at junction IDs.
-- **A change to the region seed or the road import has the same effect.** New junction IDs make the stored team bases and routes wrong.
-- **Teams come only from the seed.** `seed.py` copies `TEAM_BASES` (or `DEFAULT_TEAMS`) into an organisation's graph once. No API creates or edits a team yet.
+- **A change to the region seed or the road import has the same effect.** New junction IDs make the stored team bases and routes wrong. A change to `LANDMARKS` or `<area>_places.json` does not: it changes only `landmark_version()`, and the next start replaces only the landmarks.
+- **Teams have fixed names.** Every query finds a team by `name` (assignments, `Field-<team>` agents, lessons, Telegram). Do not add a rename or a delete. A team goes off duty (`status = 'off_duty'`) instead. Only the demo organisations in the area's `TEAM_BASES` get seeded teams. Any other organisation starts with none.
+- **Local names live in Redis, not only in the graph.** The `rn:gazetteer:<area>:*` keys keep the landmarks and local names that coordinators add. `seed_region` writes them again after each rebuild. Do not delete these keys in a reset.
+- **Landmark order matters.** `geo.landmarks()` returns hand, then app, then osm landmarks. On a tie, `parse_message` and `geo.resolve` take the first match. An automatic local name must never be only generic words (`places.GENERIC`).
 - **The phone number has two kinds.** `phone` with `phone_kind = "own"` can identify a household. `alt_phone` and a neighbour's number are only for contact. Never use them to match households.
 - **Far pins.** A pin more than 8 km from the area is snapped into the area only when `DEMO_SNAP_PINS` allows it. By default that is only the fictional `ganga_nagar`. On a real area, such a pin is a real place outside the operation.
 - **Demo timings.** `LEASE_MS=8000` and `DISPATCH_WORK_MS=2000` are short on purpose, for the crash demo. Do not treat them as production values.

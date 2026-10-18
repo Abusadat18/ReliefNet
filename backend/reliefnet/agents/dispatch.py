@@ -45,7 +45,9 @@ class DispatchAgent(Agent):
 
         options = [o for t in teams if (o := await self.consider(t, req, dest, penalties, lessons))]
         if not options:
-            if any(coverage(req.needs, t.supplies) > 0 for t in teams):
+            if not teams:
+                why = "no team is on duty"
+            elif any(coverage(req.needs, t.supplies) > 0 for t in teams):
                 why = "every route from a team that can help is flooded"
             else:
                 why = f"no team carries {', '.join(req.needs) or 'what this household needs'}"

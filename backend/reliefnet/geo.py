@@ -12,7 +12,7 @@ import time
 from rapidfuzz import fuzz, process
 
 from .config import get_settings
-from .db import REGION_GRAPH, query
+from .db import REGION_GRAPH, query, redis
 from . import areas
 from .areas import haversine_m
 
@@ -33,12 +33,27 @@ def invalidate() -> None:
     _cache.clear()
 
 
+# gazetteer.py raises this number after each landmark change.
+LANDMARKS_REV = "rn:gazetteer:rev"
+_seen_rev: dict[str, str | None] = {}
+
+
 async def landmarks() -> list[dict]:
+    """Hand-written landmarks first, then the coordinators' landmarks, then OpenStreetMap places.
+
+    On a tie, a name match picks the first landmark, so this order matters."""
+    # A coordinator can add a name in the API process; the workers see it on their next call.
+    rev = await redis().get(LANDMARKS_REV)
+    if _seen_rev.get("landmarks", "") != rev:
+        _cache.pop("landmarks", None)
+        _seen_rev["landmarks"] = rev
+
     async def load():
         return await query(
             REGION_GRAPH,
             "MATCH (l:Landmark) RETURN l.id AS id, l.name AS name, l.aliases AS aliases, l.ward AS ward,"
-            " l.kind AS kind, l.lat AS lat, l.lon AS lon",
+            " l.kind AS kind, l.lat AS lat, l.lon AS lon, coalesce(l.source, 'hand') AS source"
+            " ORDER BY CASE coalesce(l.source, 'hand') WHEN 'hand' THEN 0 WHEN 'app' THEN 1 ELSE 2 END, l.id",
             readonly=True,
         )
 

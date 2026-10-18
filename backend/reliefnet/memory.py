@@ -91,13 +91,17 @@ async def _finish(
     reason: str,
     then: str = "",
     params: dict | None = None,
+    guard: str = "",
 ) -> bool:
     """Guarded end of a step: set the new status, release the lease, add a
     PROCESSED_BY edge with the reason, then run `then` (more Cypher that can
-    use `r` for the item and `a` for this agent). False if the lease was lost."""
+    use `r` for the item and `a` for this agent). False if the lease was lost.
+
+    `guard` is an extra MATCH before any write: when it finds nothing, nothing is written."""
     rows = await query(
         org_graph_name(org),
         f"MATCH (r:{me.label} {{id:$id}}) WHERE r.claimed_by = $me"
+        f" {guard}"
         " SET r += $props, r.status = $next, r.claimed_by = NULL, r.lease_until = NULL, r.updated_at = $now"
         " WITH r MERGE (a:Agent {name:$me}) ON CREATE SET a.kind = $kind"
         " CREATE (r)-[:PROCESSED_BY {at:$now, action:$kind, from:$from, to:$next, reason:$reason}]->(a)"
@@ -346,17 +350,15 @@ async def assign_team(
     reason: str,
 ) -> bool:
     """Mark the request ASSIGNED, create ASSIGNED_TO and the HANDED_OFF edge to the
-    team's field agent. Refuses if the request already has an active assignment."""
+    team's field agent. Refuses if the request already has an active assignment,
+    or if the team went off duty after Dispatch read the team list."""
     return await _finish(
         org, me, request_id, "ASSIGNED",
         {"team": team, "assigned_at": now_ms(), "eta_min": eta_min, "route_roads": route["roads"],
          "route": route_json, "route_length_m": route["length_m"], "blocked_reason": ""},
         reason,
         then=(
-            " WITH r, a"
-            " OPTIONAL MATCH (r)-[old:ASSIGNED_TO {active:true}]->()"
-            " WITH r, a, count(old) AS existing WHERE existing = 0"
-            " MATCH (t:Team {name:$team}) MATCH (r)-[:FOR]->(f:Family)"
+            " WITH r, a MATCH (t:Team {name:$team}) MATCH (r)-[:FOR]->(f:Family)"
             " CREATE (r)-[:ASSIGNED_TO {active:true, at:$now, eta_min:$eta, roads:$roads, by:$me}]->(t)"
             " SET f.status = 'ASSIGNED'"
             " MERGE (fa:Agent {name:'Field-' + $team}) ON CREATE SET fa.kind = 'field'"
@@ -364,6 +366,8 @@ async def assign_team(
             + _USED_LESSONS
         ),
         params={"team": team, "eta": eta_min, "roads": route["roads"], "used": used_lessons},
+        # Both checks run before any write, so a refused assignment changes nothing.
+        guard="AND NOT (r)-[:ASSIGNED_TO {active:true}]->() MATCH (:Team {name:$team, status:'active'})",
     )
 
 
@@ -549,7 +553,7 @@ async def household_history(org: str, family_id: str) -> dict[str, list[dict]]:
     out["reroutes"] = await query(
         g,
         "MATCH (r:Request)-[x:REROUTED]->(t:Team) WHERE r.id IN $ids"
-        " RETURN r.id AS rid, x.at AS at, x.road AS road, t.name AS team",
+        " RETURN r.id AS rid, x.at AS at, x.road AS road, x.reason AS reason, t.name AS team",
         ids, readonly=True,
     )
     out["lessons"] = await query(

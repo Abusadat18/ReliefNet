@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 
-from . import events, orgs, routing
+from . import areas, events, orgs, routing
 from .db import REGION_GRAPH, now_ms, org_graph_name, query, redis
+from .domain import SUPPLIES, TEAM_CAPACITY_MAX, TEAM_NAME_MAX
 
 log = logging.getLogger(__name__)
 
@@ -42,22 +44,33 @@ async def ingest_message(
     return mid
 
 
-async def reroute_affected(org: str, road: str) -> list[str]:
+async def _send_back(org: str, match: str, params: dict, why: str, edge: str) -> list[str]:
+    """Give active assignments back to Dispatch: the request returns to TRIAGED with a higher
+    priority and a REROUTED edge. `match` binds `r`, `a` (ASSIGNED_TO) and `t` (the team)."""
     rows = await query(
         org_graph_name(org),
-        "MATCH (r:Request {status:'ASSIGNED'})-[a:ASSIGNED_TO {active:true}]->(t:Team)"
-        " WHERE $road IN r.route_roads"
+        f"{match}"
         " SET a.active = false, a.ended = 'rerouted', r.status = 'TRIAGED', r.claimed_by = NULL,"
         "   r.lease_until = NULL, r.rerouted = coalesce(r.rerouted, 0) + 1, r.reroute_reason = $why,"
         "   r.priority = r.priority + 5"
-        " CREATE (r)-[:REROUTED {at:$now, road:$road, team:t.name}]->(t)"
+        f" CREATE (r)-[:REROUTED {{{edge}}}]->(t)"
         " WITH r MATCH (r)-[:FOR]->(f:Family) SET f.status = 'UNSERVED'"
         " RETURN r.id AS id",
-        {"road": road, "now": now_ms(), "why": f"{road} flooded on the assigned route"},
+        {**params, "now": now_ms(), "why": why},
     )
     ids = [r["id"] for r in rows]
     if ids:
         await events.incr(org, "rerouted", len(ids))
+    return ids
+
+
+async def reroute_affected(org: str, road: str) -> list[str]:
+    ids = await _send_back(
+        org,
+        "MATCH (r:Request {status:'ASSIGNED'})-[a:ASSIGNED_TO {active:true}]->(t:Team) WHERE $road IN r.route_roads",
+        {"road": road}, f"{road} flooded on the assigned route", "at:$now, road:$road, team:t.name",
+    )
+    if ids:
         await events.publish(
             org, "rerouted", f"{road} flooded: {len(ids)} assignment(s) sent back to Dispatch for a new route",
             road=road, ids=ids,
@@ -200,3 +213,153 @@ async def nearest_shelters(lat: float, lon: float, limit: int = 3) -> list[dict]
         {"lat": lat, "lon": lon, "n": limit},
         readonly=True,
     )
+
+
+# ---------------------------------------------------------------- teams
+# Every query finds a team by its name (assignments, field agents, lessons, Telegram),
+# so a name never changes after creation, and a team is never deleted: it goes off duty.
+
+class TeamError(ValueError):
+    """A team change that the server refuses. `status` is the HTTP status for the API."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+# No "/": the name is part of the team's URL in the API.
+_TEAM_NAME = re.compile(r"^\w[\w .'&()-]*$")
+
+
+def clean_team_name(name: str) -> str:
+    name = " ".join((name or "").split())
+    if not name:
+        raise TeamError("Enter a team name.")
+    if len(name) > TEAM_NAME_MAX:
+        raise TeamError(f"Use a team name of {TEAM_NAME_MAX} characters or fewer.")
+    if not _TEAM_NAME.match(name):
+        raise TeamError("Use only letters, digits, spaces and . ' & ( ) - in a team name.")
+    return name
+
+
+def clean_supplies(supplies: list[str] | None) -> list[str]:
+    chosen = {s.strip().lower() for s in supplies or [] if s and s.strip()}
+    unknown = sorted(chosen - set(SUPPLIES))
+    if unknown:
+        raise TeamError(f"Unknown supply: {', '.join(unknown)}. Choose from {', '.join(SUPPLIES)}.")
+    if not chosen:
+        raise TeamError("Select one or more supplies.")
+    return [s for s in SUPPLIES if s in chosen]
+
+
+def clean_capacity(capacity: int) -> int:
+    if isinstance(capacity, bool) or not isinstance(capacity, int) or not 1 <= capacity <= TEAM_CAPACITY_MAX:
+        raise TeamError(f"Set a capacity from 1 to {TEAM_CAPACITY_MAX}.")
+    return capacity
+
+
+def team_base(lat: float, lon: float) -> areas.Junction:
+    """The road junction nearest to the chosen point. Routes start at a junction."""
+    reg = areas.region()
+    if not areas.ward_at(reg, lat, lon):
+        raise TeamError("Put the team base inside the operation area.")
+    return areas.nearest_junction(reg, lat, lon)
+
+
+async def list_teams(org: str) -> list[dict]:
+    return await query(
+        org_graph_name(org),
+        "MATCH (t:Team)"
+        " OPTIONAL MATCH (x:Request {status:'ASSIGNED'})-[:ASSIGNED_TO {active:true}]->(t)"
+        " WITH t, count(DISTINCT x) AS load"
+        " OPTIONAL MATCH (v:Volunteer)-[:MEMBER_OF]->(t)"
+        " RETURN t.name AS name, t.supplies AS supplies, t.capacity AS capacity, t.status AS status,"
+        " t.base_junction AS base, t.lat AS lat, t.lon AS lon, load, collect(v.name) AS members"
+        " ORDER BY name",
+        readonly=True,
+    )
+
+
+async def create_team(org: str, name: str, supplies: list[str], capacity: int, lat: float, lon: float,
+                      *, by: str) -> dict:
+    name = clean_team_name(name)
+    supplies = clean_supplies(supplies)
+    capacity = clean_capacity(capacity)
+    base = team_base(lat, lon)
+    # The check and the write are one query, so two admins cannot add the same name at once.
+    rows = await query(
+        org_graph_name(org),
+        "OPTIONAL MATCH (x:Team) WHERE toLower(x.name) = $key"
+        " WITH count(x) AS taken WHERE taken = 0"
+        " CREATE (t:Team {name:$name, supplies:$supplies, base_junction:$base, capacity:$capacity,"
+        "   lat:$lat, lon:$lon, status:'active', created_at:$now, created_by:$by})"
+        " MERGE (a:Agent {name:'Field-' + $name}) SET a.kind = 'field'"
+        " MERGE (a)-[:WORKS_FOR]->(t)"
+        " RETURN t.name AS name",
+        {"key": name.lower(), "name": name, "supplies": supplies, "base": base.id, "capacity": capacity,
+         "lat": base.lat, "lon": base.lon, "now": now_ms(), "by": by},
+    )
+    if not rows:
+        raise TeamError(f"A team with the name {name} exists. Use a different name.", 409)
+    await events.publish(org, "team", f"{name} added ({', '.join(supplies)}; capacity {capacity})",
+                         team=name, change="added")
+    return {"name": name, "supplies": supplies, "capacity": capacity, "status": "active", "base": base.id,
+            "lat": base.lat, "lon": base.lon}
+
+
+async def update_team(org: str, name: str, *, supplies: list[str] | None = None, capacity: int | None = None,
+                      lat: float | None = None, lon: float | None = None, by: str) -> dict:
+    """Change the supplies, the capacity or the base. Active assignments keep their routes."""
+    props: dict = {}
+    if supplies is not None:
+        props["supplies"] = clean_supplies(supplies)
+    if capacity is not None:
+        props["capacity"] = clean_capacity(capacity)
+    if (lat is None) != (lon is None):
+        raise TeamError("Send the latitude and the longitude of the base together.")
+    if lat is not None and lon is not None:
+        base = team_base(lat, lon)
+        props |= {"base_junction": base.id, "lat": base.lat, "lon": base.lon}
+    if not props:
+        raise TeamError("Change the supplies, the capacity or the base.")
+    rows = await query(
+        org_graph_name(org),
+        "MATCH (t:Team {name:$name}) SET t += $props, t.updated_at = $now, t.updated_by = $by"
+        " RETURN t.name AS name, t.supplies AS supplies, t.capacity AS capacity, t.status AS status,"
+        " t.base_junction AS base, t.lat AS lat, t.lon AS lon",
+        {"name": name, "props": props, "now": now_ms(), "by": by},
+    )
+    if not rows:
+        raise TeamError(f"Team {name} does not exist.", 404)
+    changed = ", ".join("base" if k == "base_junction" else k for k in props if k not in ("lat", "lon"))
+    await events.publish(org, "team", f"{name} changed: {changed}", team=name, change="updated")
+    return rows[0]
+
+
+async def set_team_duty(org: str, name: str, on_duty: bool, *, by: str) -> dict:
+    """Put a team on duty or off duty. Off duty sends its active assignments back to Dispatch.
+
+    The status changes first. Dispatch's assignment write needs an active team
+    (see `memory.assign_team`), so no new assignment can arrive after this point."""
+    status = "active" if on_duty else "off_duty"
+    rows = await query(
+        org_graph_name(org),
+        "MATCH (t:Team {name:$name}) WITH t, t.status AS before"
+        " SET t.status = $status, t.duty_at = $now, t.duty_by = $by RETURN before",
+        {"name": name, "status": status, "now": now_ms(), "by": by},
+    )
+    if not rows:
+        raise TeamError(f"Team {name} does not exist.", 404)
+    ids: list[str] = []
+    if not on_duty:
+        ids = await _send_back(
+            org,
+            "MATCH (r:Request {status:'ASSIGNED'})-[a:ASSIGNED_TO {active:true}]->(t:Team {name:$team})",
+            {"team": name}, f"{name} off duty", "at:$now, reason:$why, team:t.name",
+        )
+    if rows[0]["before"] != status or ids:
+        text = f"{name} is on duty" if on_duty else f"{name} is off duty"
+        if ids:
+            text += f": {len(ids)} assignment(s) sent back to Dispatch"
+        await events.publish(org, "team", text, team=name, change="duty", status=status, ids=ids)
+    return {"name": name, "status": status, "rerouted": ids}

@@ -4,7 +4,17 @@ import { useSession } from "../auth";
 import { clock } from "../hooks";
 import { Md } from "./Md";
 
-function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({
+  title,
+  onClose,
+  children,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  wide?: boolean;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -13,7 +23,7 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`dialog${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>{title}</h2>
           <button type="button" className="btn quiet" onClick={onClose}>

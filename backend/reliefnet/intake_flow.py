@@ -22,6 +22,8 @@ from .domain import NEEDS as DOMAIN_NEEDS
 NEEDS = ["evacuation", "rescue", "food", "water", "medicine", "baby_food", "blankets", "shelter"]
 SITUATION = ["elderly", "children", "medical", "water_entering", "trapped", "life_risk"]
 PEOPLE_BUTTONS = [1, 2, 3, 4, 5]
+# A ward can have dozens of landmarks. Show the first few as buttons; a typed name can match any of them.
+LANDMARK_BUTTONS = 8
 MAX_PEOPLE = 500
 STALE_AFTER_S = 600
 
@@ -165,7 +167,7 @@ class Event:
 
 @dataclass
 class Ctx:
-    landmarks: dict[int, list[str]]  # ward number -> landmark names, from the gazetteer
+    landmarks: dict[int, list[str]]  # ward number -> landmark names, from the gazetteer, best first
     reporter_id: str = ""  # a linked volunteer's id; empty for the public
     now: float = 0.0
 
@@ -279,7 +281,7 @@ def render(d: Draft, ctx: Ctx, note: str = "") -> list[Reply]:
         buttons = [Button(f"ward:{n}", t("ward_n", lang, n=n)) for n in sorted(ctx.landmarks)]
         return [Reply(prefix + t("ward", lang), buttons + [_skip(lang)])]
     if s == "landmark":
-        names = ctx.landmarks.get(d.ward, [])
+        names = ctx.landmarks.get(d.ward, [])[:LANDMARK_BUTTONS]
         buttons = [Button(f"lm:{i}", n) for i, n in enumerate(names)]
         return [Reply(prefix + t("landmark", lang), buttons + [Button("lm:none", t("landmark_none", lang))])]
     if s == "detail":

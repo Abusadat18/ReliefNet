@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import areas, auth, db, events, field_ops, geo, llm, orgs, routing, sim
+from . import areas, auth, db, events, field_ops, gazetteer, geo, llm, orgs, routing, sim
 from .agents.base import AGENTS_KEY, cmd_key
 from .agents.coordinator import answer_why, family_trace, make_briefing
 from .agents.field import FieldSession, history
@@ -26,6 +26,7 @@ from .agents.learner import LearnerAgent
 from .auth import User, current_user, require
 from .config import get_settings
 from .db import REGION_GRAPH, now_ms, org_graph_name, query
+from .domain import SUPPLIES, TEAM_CAPACITY_MAX, TEAM_NAME_MAX
 from .embed import mode as embed_mode
 from .seed import seed_all
 
@@ -380,15 +381,67 @@ async def add_message(body: MessageIn, user: User = Depends(require("coordinator
     return {"id": await field_ops.ingest_message(user.org, body.text, body.channel, sender=user.id)}
 
 
+# ---------------------------------------------------------------- teams
+# Admins add and edit teams; coordinators put a team on or off duty.
+# There is no delete: assignments, lessons and "why" answers refer to the team by name.
 @app.get("/api/ops/teams")
 async def teams(user: User = Depends(current_user)):
-    return await query(
-        org_graph_name(user.org),
-        "MATCH (t:Team) OPTIONAL MATCH (v:Volunteer)-[:MEMBER_OF]->(t)"
-        " RETURN t.name AS name, t.supplies AS supplies, t.capacity AS capacity, t.status AS status,"
-        " collect(v.name) AS members ORDER BY t.name",
-        readonly=True,
-    )
+    return await field_ops.list_teams(user.org)
+
+
+@app.get("/api/ops/supplies")
+async def supplies(user: User = Depends(current_user)):
+    return {"supplies": SUPPLIES, "capacity_max": TEAM_CAPACITY_MAX, "name_max": TEAM_NAME_MAX}
+
+
+class TeamCreateIn(BaseModel):
+    name: str = Field(max_length=200)
+    supplies: list[str] = Field(max_length=50)
+    capacity: int
+    lat: float
+    lon: float
+
+
+class TeamEditIn(BaseModel):
+    supplies: list[str] | None = Field(default=None, max_length=50)
+    capacity: int | None = None
+    lat: float | None = None
+    lon: float | None = None
+
+
+class DutyIn(BaseModel):
+    on_duty: bool
+
+
+def _team_error(e: field_ops.TeamError) -> HTTPException:
+    return HTTPException(e.status, str(e))
+
+
+@app.post("/api/ops/teams")
+async def create_team(body: TeamCreateIn, user: User = Depends(require("admin"))):
+    try:
+        return await field_ops.create_team(user.org, body.name, body.supplies, body.capacity, body.lat, body.lon,
+                                           by=user.id)
+    except field_ops.TeamError as e:
+        raise _team_error(e) from e
+
+
+@app.patch("/api/ops/teams/{name}")
+async def edit_team(name: str, body: TeamEditIn, user: User = Depends(require("admin"))):
+    try:
+        return await field_ops.update_team(user.org, name, supplies=body.supplies, capacity=body.capacity,
+                                           lat=body.lat, lon=body.lon, by=user.id)
+    except field_ops.TeamError as e:
+        raise _team_error(e) from e
+
+
+@app.post("/api/ops/teams/{name}/duty")
+async def team_duty(name: str, body: DutyIn, user: User = Depends(require("coordinator"))):
+    try:
+        return await field_ops.set_team_duty(user.org, name, body.on_duty, by=user.id)
+    except field_ops.TeamError as e:
+        raise _team_error(e) from e
+# ---------------------------------------------------------------- end teams
 
 
 @app.get("/api/ops/tenancy")
@@ -405,6 +458,46 @@ async def tenancy(user: User = Depends(require("coordinator"))):
         "graphs_in_instance": len(all_graphs),
         "org_graphs": sum(1 for x in all_graphs if x.startswith("org_")),
     }
+
+
+# ---------------------------------------------------------------- landmarks
+# Landmarks are in the shared region graph, so a local name added here helps every organisation.
+class AliasIn(BaseModel):
+    alias: str = Field(min_length=2, max_length=60)
+
+
+class LandmarkIn(BaseModel):
+    name: str = Field(min_length=3, max_length=80)
+    aliases: list[str] = Field(default_factory=list, max_length=10)
+    kind: str = "landmark"
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+def _gazetteer_error(e: gazetteer.GazetteerError) -> HTTPException:
+    return HTTPException(e.status, str(e))
+
+
+@app.get("/api/region/landmarks")
+async def region_landmarks(user: User = Depends(require("coordinator"))):
+    return {"landmarks": await geo.landmarks(), "kinds": list(gazetteer.KINDS)}
+
+
+@app.post("/api/region/landmarks/{lid}/aliases")
+async def add_landmark_alias(lid: str, body: AliasIn, user: User = Depends(require("coordinator"))):
+    try:
+        return await gazetteer.add_alias(lid, body.alias, by=user.id)
+    except gazetteer.GazetteerError as e:
+        raise _gazetteer_error(e) from e
+
+
+@app.post("/api/region/landmarks")
+async def add_landmark(body: LandmarkIn, user: User = Depends(require("coordinator"))):
+    try:
+        return await gazetteer.add_landmark(body.name, body.aliases, body.kind, body.lat, body.lon, by=user.id)
+    except gazetteer.GazetteerError as e:
+        raise _gazetteer_error(e) from e
+# ---------------------------------------------------------------- end landmarks
 
 
 # ---------------------------------------------------------------- simulator

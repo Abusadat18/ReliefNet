@@ -1679,6 +1679,172 @@ select.input {
   font-weight: 600;
 }
 
+/* ------------------------------------------------------------ teams */
+.dialog.wide {
+  width: min(820px, calc(100vw - 32px));
+}
+.team-empty {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100% - 32px));
+  padding: 18px 20px;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.team-empty h3 {
+  margin: 0;
+  font-size: var(--step-1);
+  font-variation-settings: "wdth" 110;
+}
+.team-empty p {
+  margin: 0;
+  color: var(--ink-2);
+}
+.team-table-wrap {
+  overflow-x: auto;
+}
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+.team-table th,
+.team-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+.team-table thead th {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.team-table tbody th {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.team-table tr.off th,
+.team-table tr.off td:not(:nth-last-child(-n + 2)) {
+  color: var(--ink-3);
+}
+.team-table .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.team-table .muted {
+  color: var(--ink-3);
+}
+.toggle.duty {
+  white-space: nowrap;
+  gap: 6px;
+}
+.team-form {
+  display: grid;
+  gap: 14px;
+}
+.team-form h3 {
+  margin: 0;
+  font-size: var(--step-1);
+}
+.team-form .row {
+  display: flex;
+  gap: 10px;
+}
+.team-form fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.team-form legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: var(--step--1);
+}
+.supply-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px 12px;
+}
+
+/* ------------------------------------------------------------ places */
+.dialog .row:has(> .places-search) {
+  align-items: end;
+}
+.places-search {
+  flex: 1 1 260px;
+}
+.places-list {
+  display: grid;
+  max-height: 46vh;
+  overflow: auto;
+  border-top: 1px solid var(--rule);
+}
+.place-row {
+  display: grid;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.place-row:hover {
+  background: var(--paper-2);
+}
+.place-row.on {
+  background: var(--route-soft);
+}
+.place-row .place-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.place-row .muted {
+  color: var(--ink-3);
+  font-size: var(--step--1);
+}
+.place-aliases {
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+.chip.src-app {
+  background: var(--served-soft);
+  color: var(--served);
+}
+.chip.src-osm {
+  background: transparent;
+  border: 1px solid var(--rule);
+}
+.place-form {
+  display: grid;
+  gap: 10px;
+}
+.place-form h3 {
+  margin: 0;
+  font-size: var(--step-1);
+}
+.place-form .row .input {
+  flex: 1 1 200px;
+  width: auto;
+}
+.place-form .row .field {
+  flex: 1 1 160px;
+}
+
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 1180px) {
   .station {

@@ -31,7 +31,7 @@ def test_area_is_connected_and_complete(name):
     assert all(lm["ward"] for lm in reg.landmarks), "every landmark must sit inside a ward"
     assert all(s["ward"] for s in reg.shelters)
     m = areas.module(name)
-    for teams in [*m.TEAM_BASES.values(), m.DEFAULT_TEAMS]:
+    for teams in m.TEAM_BASES.values():
         assert all(areas.ward_at(reg, t.lat, t.lon) for t in teams), "team bases must sit inside the area"
     assert set(areas.drill(name).hotspot_wards) <= {w["num"] for w in reg.wards}
 

@@ -2,9 +2,14 @@
 
     python -m reliefnet.areas.import_osm patna
     python -m reliefnet.areas.import_osm patna --cache osm.json   # reuse a download
+    python -m reliefnet.areas.import_osm patna --places           # named places only
 
 The script writes `<area>.json` next to the area module. Commit that file. The
 app reads it at seed time and never calls OpenStreetMap while it runs.
+
+`--places` writes only `<area>_places.json`: temples, mosques, hospitals, schools,
+markets, stations, parks and other named places (see `places.py`). It does not
+touch the roads, so the junction ids and every organisation's graph stay valid.
 
 The graph keeps the streets that connect: short dead ends go, but the side
 lanes stay, because they are the detours when a main road floods."""
@@ -21,7 +26,7 @@ from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 
-from . import haversine_m, module
+from . import haversine_m, module, places
 
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter"]
 MAIN = {"trunk", "primary", "secondary", "tertiary", "unclassified"}
@@ -46,6 +51,21 @@ def overpass_query(bbox: tuple[float, float, float, float], pad: float = 0.006) 
         f'way["waterway"~"^(river|canal|drain|stream|ditch)$"]({wide});'
         f'way["railway"="rail"][!"service"]({box});'
         ");out geom;"
+    )
+
+
+def places_query(bbox: tuple[float, float, float, float]) -> str:
+    s, w, n, e = bbox
+    box = f"{s},{w},{n},{e}"
+    amenity = ("place_of_worship|hospital|clinic|school|college|university|marketplace|bus_station|police|"
+               "post_office|fire_station|townhall|bank")
+    return (
+        "[out:json][timeout:120];("
+        f'nwr["amenity"~"^({amenity})$"]["name"]({box});'
+        f'nwr["railway"~"^(station|halt)$"]["name"]({box});'
+        f'nwr["leisure"~"^(park|stadium|sports_centre)$"]["name"]({box});'
+        f'nwr["shop"="mall"]["name"]({box});'
+        ");out tags center;"
     )
 
 
@@ -447,6 +467,25 @@ def _split_distant_namesakes(g: Graph, names: dict[int, str], area, mid) -> None
                     names[eid] = f"{name}, {ward}"
 
 
+def write_places(osm: dict, area) -> None:
+    rows = places.from_osm(osm, area.BBOX, city=getattr(area, "CITY", area.TITLE.rsplit(",", 1)[-1].strip()))
+    out = {
+        "area": area.NAME,
+        "bbox": area.BBOX,
+        "attribution": places.ATTRIBUTION,
+        "osm_timestamp": osm.get("osm3s", {}).get("timestamp_osm_base", ""),
+        "imported": date.today().isoformat(),
+        "places": rows,
+    }
+    target = places.path(area)
+    # One place on each line keeps a new import easy to review.
+    body = ",\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in rows)
+    head = json.dumps({k: v for k, v in out.items() if k != "places"}, ensure_ascii=False, separators=(",", ":"))
+    target.write_text(f'{head[:-1]},"places":[\n{body}\n]}}\n', encoding="utf-8")
+    kinds = Counter(r["kind"] for r in rows)
+    print(f"{target.name}: {len(rows)} places {dict(sorted(kinds.items()))}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("area")
@@ -454,6 +493,8 @@ def main() -> None:
     ap.add_argument("--min-lane", type=float, default=LIMITS["min_lane"],
                     help="keep an unnamed minor street only if it is at least this long, in metres")
     ap.add_argument("--stub", type=float, default=LIMITS["stub"], help="remove unnamed dead ends shorter than this, in metres")
+    ap.add_argument("--places", action="store_true",
+                    help="download only the named places and write <area>_places.json; the roads stay as they are")
     args = ap.parse_args()
     LIMITS.update(min_lane=args.min_lane, stub=args.stub)
     area = module(args.area)
@@ -461,9 +502,12 @@ def main() -> None:
     if cache and cache.exists():
         osm = json.loads(cache.read_text(encoding="utf-8"))
     else:
-        osm = download(overpass_query(area.BBOX))
+        osm = download(places_query(area.BBOX) if args.places else overpass_query(area.BBOX))
         if cache:
             cache.write_text(json.dumps(osm), encoding="utf-8")
+    if args.places:
+        write_places(osm, area)
+        return
     out = build(osm, area)
     out = {
         "area": area.NAME,

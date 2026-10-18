@@ -47,6 +47,13 @@ export interface Landmark {
   kind: string;
   lat: number;
   lon: number;
+  // hand: the area's own list; osm: OpenStreetMap; app: added by a coordinator.
+  source?: "hand" | "osm" | "app";
+}
+
+export interface LandmarkList {
+  landmarks: Landmark[];
+  kinds: string[];
 }
 
 export interface Shelter {
@@ -230,4 +237,23 @@ export interface ChatTurn {
   text: string;
   at: number;
   actions?: { tool: string; input: Record<string, unknown>; result: unknown }[];
+}
+
+// --- teams
+export interface Team {
+  name: string;
+  supplies: string[];
+  capacity: number;
+  status: "active" | "off_duty" | string;
+  base: string;
+  lat: number;
+  lon: number;
+  load: number;
+  members: string[];
+}
+
+export interface TeamRules {
+  supplies: string[];
+  capacity_max: number;
+  name_max: number;
 }

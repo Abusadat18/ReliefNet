@@ -77,7 +77,13 @@ class Bot:
 
     async def flow_ctx(self, reporter_id: str = "") -> iflow.Ctx:
         names: dict[int, list[str]] = {w["num"]: [] for w in await geo.wards()}
-        for l in await geo.landmarks():
+        # The help form shows only the first few as buttons: the hand-written and local ones first,
+        # then the kinds of OpenStreetMap place that people name most.
+        rank = {k: i for i, k in enumerate(["temple", "mosque", "church", "hospital", "school", "transport",
+                                            "market", "ground"])}
+        lms = sorted(await geo.landmarks(), key=lambda l: (l.get("source") == "osm", rank.get(l["kind"], 99)
+                                                            if l.get("source") == "osm" else 0))
+        for l in lms:
             names.setdefault(l["ward"], []).append(l["name"])
         return iflow.Ctx(landmarks=names, reporter_id=reporter_id, now=time.time())
 

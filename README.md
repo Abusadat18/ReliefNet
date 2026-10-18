@@ -187,13 +187,16 @@ FalkorDB also holds the plain Redis data: the live event stream, counters and ch
 The seed step (`seed.py`) creates demo data the first time ReliefNet starts:
 
 - **The region graph:** Rajendra Nagar and Kankarbagh in Patna, with real roads from OpenStreetMap: about 2,350 junctions, 3,500 road pieces, 48 bridges and flyovers, the drains and the railway. On top of the roads, ReliefNet adds:
-  - 41 real landmarks with the names people type (for example "Nalanda Medical College Hospital", also called "nmch" or "sarkari aspatal");
+  - 41 hand-written landmarks with the names people type (for example "Nalanda Medical College Hospital", also called "nmch" or "sarkari aspatal");
+  - about 220 more named places from OpenStreetMap (hospitals, temples, schools, parks, banks);
   - 16 wards (simple zones, not the official ward map);
   - 4 simulated shelters at real stadiums and schools.
-- **Two organisations**, each with teams. Every team has a home base on the map (the black squares) and its own supplies:
+- **Two demo organisations**, each with teams. Every team has a home base on the map (the black squares) and its own supplies:
   - Red Cross Patna: Team A, B, C and D.
   - Sahyog Local NGO: Team Alpha, Beta and Gamma.
-- **One demo volunteer per team**, for example Asha Devi and Imran Khan. In `AUTH_MODE=dev` they appear on the sign-in screen.
+- **One demo volunteer per demo team**, for example Asha Devi and Imran Khan. In `AUTH_MODE=dev` they appear on the sign-in screen.
+
+A new organisation starts with no teams. The operations screen then shows "No teams yet. Add your first team." Requests wait in `TRIAGED` until a team is on duty.
 
 Dispatch assigns work to a **team**, not to one person. Every volunteer in the team sees the assignment in the field app, and in Telegram if linked.
 
@@ -203,7 +206,37 @@ To test with your own messages instead of the drill:
 2. Send messages through the help form (http://localhost:8080/help), **Add message**, or Telegram.
 3. In a second browser, sign in as a volunteer and do the field work yourself, for example "done R-101, gave water".
 
-There is no screen yet to create or edit teams. Teams come from the seed step only.
+### Teams
+
+Open **Teams** on the operations screen to see each team's supplies, load, members and duty status.
+
+- An admin adds a team: a name, its supplies, its capacity and a base (a landmark or a shelter). The base moves to the nearest road junction.
+- An admin edits the supplies, the capacity or the base. The name of a team cannot change, because assignments, lessons and "why" answers use it.
+- A coordinator or an admin puts a team off duty. Dispatch then gives the team's active assignments to other teams, and gives it no new requests.
+- You cannot delete a team. Put it off duty instead, so its history stays.
+
+| Endpoint | Role |
+|---|---|
+| `GET /api/ops/teams` | Any signed-in user |
+| `POST /api/ops/teams` | Admin |
+| `PATCH /api/ops/teams/{name}` | Admin |
+| `POST /api/ops/teams/{name}/duty` | Coordinator or admin |
+
+### Places and local names
+
+Intake finds the place of a message from the landmark list and the local names people use. The list has three sources:
+
+- **Hand-written landmarks** in `LANDMARKS` in the area file. They win over an OpenStreetMap place at the same spot.
+- **Named places from OpenStreetMap** in `areas/<area>_places.json`, made by `python -m reliefnet.areas.import_osm <area> --places`.
+- **Places and local names that coordinators add** in the dashboard (**Places**). ReliefNet keeps them per area in Redis, so they stay after a region rebuild.
+
+A new local name reaches Intake on the next message. Landmarks are in the shared region graph, so a name helps every organisation.
+
+| Endpoint | Role |
+|---|---|
+| `GET /api/region/landmarks` | Coordinator or admin |
+| `POST /api/region/landmarks` | Coordinator or admin |
+| `POST /api/region/landmarks/{id}/aliases` | Coordinator or admin |
 
 ### Map and area
 
@@ -305,7 +338,8 @@ backend/reliefnet/
   memory.py         every graph query the agents use, as named functions
   models.py         Pydantic models for graph nodes (Message, Request, Family, Lesson, Team)
   llm.py            all model calls (LangChain); provider-independent
-  field_ops.py      shared graph writes: messages, road reports, deliveries, observations
+  field_ops.py      shared graph writes: messages, road reports, deliveries, observations, teams
+  gazetteer.py      landmark writes and the local names that coordinators add
   routing.py        road state and routing on the shared region graph
   parsing.py        the offline Hinglish message parser
   areas/            the places on the map: patna (real OSM roads), ganga_nagar (fictional), the OSM importer
@@ -332,8 +366,11 @@ docker-compose.yml  FalkorDB, API, workers, web, optional Telegram bot
 | What volunteers can do in chat | `tools()` in `agents/field.py` (each tool is a `@tool` function) |
 | What lessons are learned | `rule_lessons` and the prompt in `agents/learner.py` |
 | A graph query | `memory.py` (agents), `field_ops.py`, `routing.py`, `api.py` |
-| The area, landmarks, wards, teams or drill story | `areas/patna.py` (see [docs/AREAS.md](docs/AREAS.md)) |
+| The area, hand-written landmarks, wards, demo teams or drill story | `areas/patna.py` (see [docs/AREAS.md](docs/AREAS.md)) |
 | The roads of an area | `python -m reliefnet.areas.import_osm patna` |
+| The named places of an area | `python -m reliefnet.areas.import_osm patna --places` (writes `areas/patna_places.json`) |
+| How OpenStreetMap places merge with `LANDMARKS`, and their automatic local names | `areas/places.py` |
+| Team rules (name, supplies, capacity, base) | `field_ops.py`; the supply list is `SUPPLIES` in `domain.py` |
 | The demo volunteers | `seed.py` |
 | Model provider or model names | `.env`: `MODEL_FAST`, `MODEL_SMART` (see [Language models](#language-models)) |
 | The dashboard | `frontend/src/pages/Ops.tsx` and `frontend/src/components/` |
@@ -354,11 +391,14 @@ To look at the raw graphs, open the FalkorDB Browser at http://localhost:3000 an
 
 ## Known limits
 
-- The roads, bridges, drains and landmark positions are real (OpenStreetMap). The families, messages, teams and shelters are simulated. The wards are simple zones, not the official ward map.
+- The roads, bridges, drains, landmark positions and named places are real (OpenStreetMap). The families, messages, demo teams and shelters are simulated. The wards are simple zones, not the official ward map.
 - A flood report closes every piece of a road with that name. Long roads are not split into sections.
 - The drill compresses time: simulated teams arrive in seconds, not minutes.
 - In offline mode, the Dedupe agent keeps close calls separate, because a wrong merge can leave a family without help. The language model resolves those close calls.
 - With the lightweight `EMBED_MODE=hash`, some true duplicates stay separate. Use the default `fastembed` mode for the demo.
-- There is no screen yet to create or edit teams. Teams come from the seed step.
+- A team cannot be renamed or deleted. Put a team off duty to stop its work.
+- A change to `AREA` or to the road junctions erases the teams that admins added, because team bases point at junction IDs.
+- A coordinator can add a place or a local name, but cannot hide a wrong OpenStreetMap place or remove a local name yet.
+- A team base and a new place come from a list or from coordinates, not from a click on the map.
 - Public Telegram messages go to `TELEGRAM_DEFAULT_ORG` (or the first organisation by slug) unless the sender uses `/org`.
 - The bot collects the family's phone number, but Dedupe does not match on it yet.

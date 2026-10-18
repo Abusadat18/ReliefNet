@@ -7,6 +7,8 @@ import { BriefingDialog, DrillDialog, MessageDialog } from "../components/Dialog
 import { FamilyDrawer } from "../components/FamilyDrawer";
 import { AgentsPanel, FeedPanel, LessonsPanel, QueuePanel } from "../components/Panels";
 import { LayersMenu, useMapLayers } from "../components/LayersMenu";
+import { TeamsDialog } from "../components/TeamsDialog";
+import { PlacesDialog } from "../components/PlacesDialog";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { clock, useLiveEvents, useNow, useResource, useThrottled } from "../hooks";
 import type { AgentInfo, Lesson, LiveEvent, QueueItem, Region, Road, Snapshot, Stats, Trace } from "../types";
@@ -43,6 +45,8 @@ export function Ops() {
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [dialog, setDialog] = useState<"drill" | "brief" | "message" | null>(null);
+  const [teamsDialog, setTeamsDialog] = useState<"list" | "add" | null>(null);
+  const [placesOpen, setPlacesOpen] = useState(false);
   const [roadPop, setRoadPop] = useState<{ road: Road; x: number; y: number } | null>(null);
   const [roadMsg, setRoadMsg] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -84,6 +88,7 @@ export function Ops() {
         }
       }
       if (e.kind === "lesson") refreshLessons();
+      if (e.kind === "landmark") void region.reload();
       if (e.kind === "reset") {
         void region.reload();
         refreshRoads();
@@ -255,6 +260,12 @@ export function Ops() {
           {mergedRegion && <LayersMenu visible={layers} onChange={setLayer} />}
 
           <div className="chart-tools">
+            <button type="button" className="btn" onClick={() => setTeamsDialog("list")}>
+              Teams
+            </button>
+            <button type="button" className="btn" onClick={() => setPlacesOpen(true)}>
+              Places
+            </button>
             <button type="button" className="btn" onClick={() => setDialog("message")}>
               Add message
             </button>
@@ -265,6 +276,20 @@ export function Ops() {
               Flood drill
             </button>
           </div>
+
+          {snapshot.data && snapshot.data.teams.length === 0 && (
+            <div className="team-empty" role="status">
+              <h3>No teams yet. Add your first team.</h3>
+              <p>Dispatch cannot send help without a team. Requests wait in Triaged until a team is on duty.</p>
+              {me?.role === "admin" ? (
+                <button type="button" className="btn primary" onClick={() => setTeamsDialog("add")}>
+                  Add a team
+                </button>
+              ) : (
+                <p>Ask an admin of your organisation to add a team.</p>
+              )}
+            </div>
+          )}
 
           <section className="cartouche" aria-label="Operation figures">
             <h2>{config?.area.title ?? region.data?.area?.title} flood operation</h2>
@@ -388,6 +413,18 @@ export function Ops() {
       {dialog === "drill" && <DrillDialog isAdmin={me?.role === "admin"} onClose={() => setDialog(null)} />}
       {dialog === "brief" && <BriefingDialog onClose={() => setDialog(null)} />}
       {dialog === "message" && <MessageDialog onClose={() => setDialog(null)} />}
+      {teamsDialog && (
+        <TeamsDialog
+          isAdmin={me?.role === "admin"}
+          region={mergedRegion}
+          startWithForm={teamsDialog === "add"}
+          onClose={() => {
+            setTeamsDialog(null);
+            void snapshot.reload();
+          }}
+        />
+      )}
+      {placesOpen && <PlacesDialog onClose={() => setPlacesOpen(false)} />}
     </div>
   );
 }

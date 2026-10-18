@@ -33,6 +33,12 @@ NEED_SUPPLIES: dict[str, list[str]] = {
     "sanitation": ["water"],
 }
 
+# What a team can carry. Every supply in NEED_SUPPLIES is here.
+SUPPLIES = ["food", "water", "medicine", "first_aid", "baby_food", "blankets", "boat", "evacuation"]
+
+TEAM_NAME_MAX = 40
+TEAM_CAPACITY_MAX = 20
+
 URGENCY = ["low", "medium", "high", "critical"]
 
 LESSON_KINDS = ["road_risk", "team_skill", "area_risk", "general"]

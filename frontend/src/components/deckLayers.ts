@@ -226,7 +226,8 @@ export function buildLayers(d: DeckInput): Layer[] {
     }),
     new TextLayer<Landmark>({
       id: "landmark-names",
-      data: zoomedIn && show.places ? d.region.landmarks : [],
+      // OpenStreetMap adds hundreds of small places; name them only when the map is close in.
+      data: zoomedIn && show.places ? d.region.landmarks.filter((l) => l.source !== "osm" || d.zoom >= 17.5) : [],
       getPosition: (l) => [l.lon, l.lat],
       getText: (l) => l.name,
       getPixelOffset: [6, -8],

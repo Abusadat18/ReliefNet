@@ -152,8 +152,12 @@ async def family_trace(org: str, fid: str) -> dict:
         edges.append({"from": x["src"], "to": x["dst"], "type": "HANDED_OFF"})
         step(x["at"], x["src"], "handoff", f"handed {x['rid']} to {x['dst']}: {x['reason']}")
     for x in h["reroutes"]:
-        step(x["at"], "Road network", "reroute",
-             f"{x['road']} flooded on {x['team']}'s route, so {x['rid']} went back to Dispatch")
+        if x["road"]:
+            step(x["at"], "Road network", "reroute",
+                 f"{x['road']} flooded on {x['team']}'s route, so {x['rid']} went back to Dispatch")
+        else:
+            step(x["at"], x["team"], "reroute",
+                 f"{x['reason'] or x['team'] + ' off duty'}, so {x['rid']} went back to Dispatch")
     for l in h["lessons"]:
         node(l["key"], "Lesson", l["text"])
         edges.append({"from": l["rid"], "to": l["key"], "type": "USED_LESSON"})

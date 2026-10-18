@@ -47,7 +47,8 @@ class Household:
 def make_households(n: int, seed: int) -> list[Household]:
     rng = random.Random(seed)
     by_ward: dict[int, list[tuple[str, list[str]]]] = {}
-    for lm in areas.region().landmarks:
+    # Only the hand-written landmarks: they carry the local names that people use in a message.
+    for lm in (l for l in areas.region().landmarks if l.get("source", "hand") == "hand"):
         by_ward.setdefault(lm["ward"], []).append((lm["name"], lm["aliases"]))
     wards = sorted(by_ward)
     hot = [w for w in areas.drill().hotspot_wards if w in by_ward]

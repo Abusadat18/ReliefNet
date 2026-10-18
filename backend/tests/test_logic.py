@@ -1,7 +1,10 @@
 """Pure-logic tests: no database needed."""
+import pytest
+
 from reliefnet.agents.dedupe import score_pair
 from reliefnet.agents.triage import cluster_bonus, score
-from reliefnet.domain import coverage
+from reliefnet.domain import NEED_SUPPLIES, SUPPLIES, coverage
+from reliefnet.field_ops import TeamError, clean_capacity, clean_supplies, clean_team_name, team_base
 from reliefnet.models import Candidate, Family, Lesson, Request
 from reliefnet.parsing import parse_message
 from reliefnet import areas
@@ -94,3 +97,35 @@ def test_coverage():
 def test_ganga_nagar_has_three_bridges():
     bridges = {r.name for r in areas.region("ganga_nagar").roads if r.kind == "bridge"}
     assert bridges == {"Old Iron Bridge", "NH-12 Bridge", "Rail Bridge"}
+
+
+def test_team_name_rules():
+    assert clean_team_name("  Boat   Crew 2 ") == "Boat Crew 2"
+    for bad in ["", "   ", "x" * 41, "Team/1", "-Team", "Team;DROP"]:
+        with pytest.raises(TeamError):
+            clean_team_name(bad)
+
+
+def test_team_supplies_and_capacity_rules():
+    assert {s for opts in NEED_SUPPLIES.values() for s in opts} <= set(SUPPLIES)
+    assert clean_supplies(["Boat", "food", "food "]) == ["food", "boat"]
+    for bad in [[], [" "], ["food", "helicopter"]]:
+        with pytest.raises(TeamError):
+            clean_supplies(bad)
+    assert clean_capacity(1) == 1 and clean_capacity(20) == 20
+    for bad in [0, 21, -3, True, 2.5]:
+        with pytest.raises(TeamError):
+            clean_capacity(bad)
+
+
+def test_team_base_must_be_inside_the_area():
+    reg = areas.region()
+    lm = reg.landmarks[0]
+    assert team_base(lm["lat"], lm["lon"]).id in {j.id for j in reg.junctions}
+    with pytest.raises(TeamError):
+        team_base(lm["lat"] + 1.0, lm["lon"])
+
+
+def test_seeded_team_supplies_are_known():
+    for teams in areas.module().TEAM_BASES.values():
+        assert all(set(t.supplies) <= set(SUPPLIES) for t in teams)
