@@ -6,6 +6,33 @@ During a flood, help requests arrive as messy messages from many channels. Volun
 
 Built for Graph Hacks (WeMakeDevs × FalkorDB), Track 02: agent memory and coordination.
 
+## Hackathon submission
+
+| | |
+|---|---|
+| Event | Graph Hacks: Context for AI Agents (WeMakeDevs × FalkorDB), 15–18 October 2026 |
+| Track | **Track 02: Agent Memory and Coordination** |
+| Demo video | *(add the link)* |
+| Live deployment | *(add the link, or use the [Quick start](#quick-start-docker): one `docker compose up -d --build`)* |
+| Graph data model | [Graph data model](#graph-data-model) |
+| Cypher and graph algorithms | [Key Cypher queries](#key-cypher-queries) |
+| AI tools | See [AI tools used](#ai-tools-used) |
+
+FalkorDB is the only memory and the only way the agents share state. No agent calls another agent. Each agent claims work in the graph, does one job and writes the result back with its reason.
+
+How ReliefNet covers the Track 02 focus points:
+
+| Track 02 focus | In ReliefNet | Where to look |
+|---|---|---|
+| Episodic memory | Every message, step and delivery is a node or an edge with a time and a reason (`BECAME`, `PROCESSED_BY`, `DUPLICATE_OF`, `HANDED_OFF`, `REROUTED`, `SERVED`). | Queue receipts, Live log, **Ask why** |
+| Semantic memory | What is true now: households (`Family`), their `Need`s, teams, and the shared region graph of roads, landmarks, neighbourhoods and shelters. | The map, `memory.py`, `seed.py` |
+| Procedural memory | The Learner writes `Lesson` nodes from field evidence (`DERIVED_FROM`). Triage and Dispatch use them, and each use is a `USED_LESSON` edge. Confidence changes as evidence comes in. | **Lessons** tab, `agents/learner.py` |
+| Remember across sessions | The graph persists (append-only file). The next shift gets a briefing written from the graph. **Ask why** reads a household's full path. Field chat history is kept in FalkorDB. | **Shift handover**, `agents/coordinator.py` |
+| Shared state and handoffs | An agent watches one request status, claims a request with a lease, and moves it to the next status in the same guarded write. That status change is the handoff. | `agents/base.py`, `memory.claim_next`, `memory.finish_step` |
+| High-concurrency reads and writes | A claim is one atomic Cypher write on the node. 30 parallel claims never get the same request (`test_parallel_claims_never_overlap`). A crashed agent's lease expires, and another copy reclaims the work. | **Agents** tab, `tests/test_graph.py` |
+| Separate memory per tenant | Each organisation has its own graph (`org_<slug>`) in one FalkorDB instance. The server takes the organisation from the verified sign-in, never from the request. | `auth.py`, `db.org_graph_name` |
+| Show the path behind an answer | Every receipt, lesson and answer shows the edges and the Cypher behind it. The **Memory** layer draws a household's graph on the map. | Queue receipts, **Graph query** tab, **Memory** |
+
 ## Quick start (Docker)
 
 1. Install Docker Desktop.
@@ -346,6 +373,142 @@ To set it up:
 The bot uses long polling, so it needs no public URL. A volunteer opens the field app, taps **Link Telegram**, and sends `/link CODE` to the bot. After that, the volunteer's messages go to the Field agent, and new assignments arrive in Telegram. Anyone else who writes to the bot creates a public help request.
 
 For the full setup steps, commands and a two-phone test, see [docs/TELEGRAM.md](docs/TELEGRAM.md).
+
+## Graph data model
+
+ReliefNet uses one FalkorDB instance with two kinds of graph:
+
+- `org_<slug>`: one graph for each organisation. It holds that organisation's households, requests, teams and lessons.
+- `region`: one shared graph for the area. It holds the roads, landmarks, neighbourhoods, wards and shelters, because a flooded road is flooded for everyone.
+
+### Organisation graph (`org_<slug>`)
+
+| Node | Key properties |
+|---|---|
+| `Message` | `id` (`M-`), `text`, `channel`, `sender`, `received_at`, `status` |
+| `Request` | `id` (`R-`), `status` (`NEW` → `RESOLVED` / `MERGED` → `TRIAGED` → `ASSIGNED` → `DELIVERED`), `priority`, `needs`, `people`, `ward`, `landmark`, `road`, `neighbourhood`, `lat`, `lon`, `embedding` (vector index), `claimed_by`, `lease_until` |
+| `Family` | `id` (`F-`), `name`, `people`, `elderly`, `children`, `needs`, `status` (`UNSERVED` / `ASSIGNED` / `SERVED`) |
+| `Need` | `name` (food, water, medicine, evacuation, …) |
+| `Agent` | `name` (for example `Dispatch-2`), `kind` |
+| `Team` | `name`, `supplies`, `capacity`, `base`, `status` |
+| `Volunteer` | `id`, `name`, `role` |
+| `Delivery` | `id` (`D-`), `items`, `notes`, `at` |
+| `Observation`, `Report` | Field notes, photos and road reports (`O-`, `RP-`) |
+| `Lesson` | `key`, `kind`, `text`, `confidence`, `seen`, `override` |
+| `Briefing` | `id` (`B-`), `shift`, `text` |
+
+| Edge | Meaning |
+|---|---|
+| `(Message)-[:BECAME]->(Request)` | Intake turned a message into a request. |
+| `(Request)-[:FOR]->(Family)` | The request belongs to this household. |
+| `(Request)-[:PROCESSED_BY {at, action, from, to, reason}]->(Agent)` | One pipeline step, with the agent's reason. |
+| `(Request)-[:DUPLICATE_OF {score, evidence, reason, decided_by}]->(Request)` | Dedupe found the same household. |
+| `(Request)-[:ASSIGNED_TO {eta_min, roads, active}]->(Team)` | Dispatch sent this team, on this route. |
+| `(Request)-[:REROUTED {road, reason}]->(Team)` | A flooded road or an off-duty team sent the request back. |
+| `(Agent)-[:HANDED_OFF {request, reason}]->(Agent)` | Dispatch handed a job to a team's Field agent. |
+| `(Team)-[:MADE]->(Delivery)-[:SERVED]->(Family)` | A team delivered help. |
+| `(Family)-[:NEEDS {open}]->(Need)` | What the household still needs. |
+| `(Lesson)-[:DERIVED_FROM]->(Family \| Delivery \| Report)` | The evidence behind a lesson. |
+| `(Request)-[:USED_LESSON {by}]->(Lesson)` | A lesson changed this decision. |
+| `(Agent)-[:WORKS_FOR]->(Team)`, `(Volunteer)-[:MEMBER_OF]->(Team)` | Who belongs to which team. |
+| `(Volunteer)-[:SAID]->(Observation)`, `(Volunteer)-[:REPORTED]->(Report)` | What volunteers reported from the field. |
+
+### Region graph (`region`)
+
+| Node or edge | Meaning |
+|---|---|
+| `(Junction)-[:ROAD {name, kind, length_m, cost, status, low_lying, geom}]->(Junction)` | The road network from OpenStreetMap, one edge in each direction. `cost` goes up when a road floods. |
+| `Landmark` | `name`, `aliases` (local names), `ward`, `kind`, `source` (`hand`, `app`, `osm`) |
+| `Neighbourhood` | `name`, `aliases`, `ward`, `polygon` |
+| `Ward`, `Shelter` | Zones and shelters, with capacity and occupancy |
+
+## Key Cypher queries
+
+All agent queries are named functions in `backend/reliefnet/memory.py`. These are the ones the product depends on.
+
+**Claim the next request with a lease** (`memory.claim_next`). One atomic write, so parallel agents never take the same request, and a request with an expired lease is free again:
+
+```cypher
+MATCH (r:Request {status:$status})
+WHERE (r.claimed_by IS NULL OR r.lease_until < $now) AND coalesce(r.not_before, 0) <= $now
+WITH r ORDER BY r.priority DESC LIMIT 1
+WITH r, r.claimed_by AS prev
+SET r.claimed_by = $me, r.lease_until = $now + $lease, r.attempts = coalesce(r.attempts, 0) + 1
+RETURN properties(r) AS item, prev
+```
+
+**Finish a step only while holding the lease** (`memory.finish_step`). The handoff to the next agent and the reason are written in the same query. If the lease is lost, nothing is written:
+
+```cypher
+MATCH (r:Request {id:$id}) WHERE r.claimed_by = $me
+SET r += $props, r.status = $next, r.claimed_by = NULL, r.lease_until = NULL, r.updated_at = $now
+WITH r MERGE (a:Agent {name:$me}) ON CREATE SET a.kind = $kind
+CREATE (r)-[:PROCESSED_BY {at:$now, action:$kind, from:$from, to:$next, reason:$reason}]->(a)
+RETURN r.id AS id
+```
+
+**Find similar earlier requests** (`memory.similar_requests`). This uses the vector index on `Request.embedding`, then follows each request to its household:
+
+```cypher
+MATCH (me:Request {id:$id})
+CALL db.idx.vector.queryNodes('Request', 'embedding', $k, me.embedding) YIELD node, score
+WITH node, score WHERE node.id <> $id
+MATCH (node)-[:FOR]->(f:Family)
+RETURN node.id AS id, f.id AS family, 1.0 - score AS similarity
+```
+
+**Merge a duplicate into the household** (`memory.merge_into_family`, inside the guarded finish). It keeps the evidence on the edge:
+
+```cypher
+MATCH (f:Family {id:$fid}), (c:Request {id:$cid})
+CREATE (r)-[:FOR]->(f)
+CREATE (r)-[:DUPLICATE_OF {at:$now, score:$score, evidence:$ev, reason:$why, decided_by:$by}]->(c)
+SET f.requests = f.requests + 1, f.needs = f.needs + [n IN r.needs WHERE NOT n IN f.needs]
+```
+
+**Route around flooded roads** (`routing.route`). This uses FalkorDB's shortest-path algorithm on the region graph:
+
+```cypher
+MATCH (a:Junction {id:$src}), (b:Junction {id:$dst})
+CALL algo.SPpaths({sourceNode:a, targetNode:b, relTypes:['ROAD'], weightProp:'cost', pathCount:$k})
+YIELD path, pathWeight
+RETURN pathWeight AS weight, [r IN relationships(path) | r.name] AS names
+```
+
+**Lessons to act on** (`memory.active_lessons`). A coordinator's override wins over the confidence:
+
+```cypher
+MATCH (l:Lesson)
+WHERE l.kind IN $kinds AND coalesce(l.override, '') <> 'off'
+  AND (l.override = 'on' OR l.confidence >= $min)
+RETURN properties(l) AS l
+```
+
+**A household's full path, for Ask why** (`memory.household_history`). It is read-only, and the **Graph query** tab shows it:
+
+```cypher
+MATCH (r:Request)-[:FOR]->(:Family {id:$id})
+OPTIONAL MATCH (m:Message)-[:BECAME]->(r)
+RETURN r.id, r.status, r.priority, m.id, m.text;
+
+MATCH (r:Request)-[p:PROCESSED_BY]->(a:Agent) WHERE r.id IN $ids
+RETURN r.id, a.name, p.at, p.action, p.reason
+// and the same for DUPLICATE_OF, ASSIGNED_TO, HANDED_OFF, REROUTED, USED_LESSON, MADE → SERVED
+```
+
+To look at the live graph, open the FalkorDB Browser at http://localhost:3000. Select your organisation's graph, run a query, and run it again to see new writes. For example:
+
+```cypher
+MATCH (r:Request)-[:FOR]->(f:Family)
+WHERE r.status <> 'MERGED' AND r.status <> 'DELIVERED'
+OPTIONAL MATCH (r)-[a:ASSIGNED_TO {active:true}]->(t:Team)
+OPTIONAL MATCH (r)-[p:PROCESSED_BY]->(ag:Agent)
+RETURN r, f, a, t, p, ag
+```
+
+## AI tools used
+
+We used Claude Code (Anthropic) as a coding assistant during the event. We used it for code, tests, the UI and the documentation. We designed the architecture, the graph model and the agent rules, and we reviewed and tested the result. We can explain every part of it.
 
 ## Configuration
 
