@@ -13,6 +13,9 @@
   --water-ink: #5d8fae;
   --hazard: #d92d20;
   --route: #2c4d5a;
+  /* The selected route looks like a Google Maps directions line: light blue with a blue edge. */
+  --direction: #8ab4f8;
+  --direction-edge: #1a73e8;
   --served: #12805c;
   --served-soft: #e4efe8;
   --waiting: #b54708;
@@ -31,6 +34,8 @@
   --water-ink: #6e9fbf;
   --hazard: #f04438;
   --route: #b9dcf2;
+  --direction: #8ab4f8;
+  --direction-edge: #4285f4;
   --served: #2fbf8a;
   --served-soft: #15261e;
   --waiting: #f79009;
@@ -166,12 +171,13 @@
   vector-effect: non-scaling-stroke;
 }
 .chart .route.focus {
+  stroke: var(--direction);
   stroke-opacity: 1;
   stroke-width: 4;
 }
 .chart .route-casing {
   fill: none;
-  stroke: var(--paper);
+  stroke: var(--direction-edge);
   stroke-width: 8;
   stroke-linecap: round;
   stroke-linejoin: round;

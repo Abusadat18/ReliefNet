@@ -84,7 +84,7 @@ function Swatch({ kind }: { kind: string }) {
     case "shelter":
       return <span className={box}><span className="size-3 rounded-full border bg-success-soft" style={{ borderColor: "var(--served)" }} /></span>;
     case "route":
-      return <span className={box}><span className="h-1 w-5 rounded-full" style={{ background: "var(--route)" }} /></span>;
+      return <span className={box}><span className="h-1.5 w-5 rounded-full border border-(--direction-edge)" style={{ background: "var(--direction)" }} /></span>;
     case "low":
       return <span className={box}><span className="h-0.5 w-5" style={{ background: "var(--water-ink)" }} /></span>;
     case "flooded":
@@ -129,13 +129,13 @@ function Legend() {
       return !o;
     });
   return (
-    <MapCard className="top-4 left-4 w-52 p-3" aria-label="Legend">
+    <MapCard className="pointer-events-auto relative flex min-h-0 w-52 shrink flex-col p-3" aria-label="Legend">
       <button type="button" className="flex w-full items-center justify-between" onClick={toggle} aria-expanded={open}>
         <Eyebrow className="text-foreground">Legend</Eyebrow>
         <ChevronDownIcon className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <ul className="mt-2 flex flex-col gap-1.5">
+        <ul className="mt-2 flex min-h-0 flex-col gap-1.5 overflow-y-auto">
           {LEGEND.map(([k, label]) => (
             <li key={k} className="flex items-center gap-2 text-xs">
               <Swatch kind={k} />
@@ -339,12 +339,11 @@ export function Ops() {
           </div>
         </div>
         <nav className="flex min-w-0 flex-1 items-stretch overflow-x-auto" aria-label="Requests at each stage">
-          {PIPELINE.map((p, i) => {
+          {PIPELINE.map((p) => {
             const hot = p.key === "TRIAGED" && (s?.requests.TRIAGED ?? 0) > 5;
             const done = p.key === "DELIVERED";
             return (
               <div key={p.key} className={cn("flex items-center gap-2.5 border-r px-4", hot && "bg-high-soft")}>
-                <span className="num text-[10px] text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
                 <span className="flex flex-col leading-tight">
                   <span className={cn("num text-[10px] tracking-wide uppercase", hot ? "text-high" : "text-muted-foreground")}>{p.name}</span>
                   <span className={cn("num text-[17px] font-semibold", hot && "text-high", done && "text-success")}>
@@ -441,8 +440,6 @@ export function Ops() {
               </p>
             )}
 
-            <Legend />
-
             {mergedRegion && (
               <div className="absolute top-4 right-16 z-10 flex items-center gap-2">
                 <Button
@@ -510,21 +507,25 @@ export function Ops() {
               </MapCard>
             )}
 
-            <MapCard className="bottom-4 left-4 w-[290px] px-4 pt-3.5 pb-2.5" aria-label="Operation figures">
-              <Eyebrow className="text-foreground">Shift status · live</Eyebrow>
-              <dl className="mt-1">
-                {figures.map(([label, value, zero]) => (
-                  <div key={label} className="flex items-end justify-between border-b py-1.5 last:border-b-0">
-                    <dt className="text-xs text-muted-foreground">{label}</dt>
-                    <dd className={cn("num text-sm font-semibold", zero && "text-success")}>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="num mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
-                Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
-                Memory: FalkorDB org_{me?.org}. {region.data?.area?.attribution}
-              </p>
-            </MapCard>
+            {/* One column, so the legend shrinks and scrolls instead of running under the figures on a short screen. */}
+            <div className="pointer-events-none absolute top-4 bottom-4 left-4 z-10 flex flex-col gap-3">
+              <Legend />
+              <MapCard className="pointer-events-auto relative mt-auto w-[290px] shrink-0 px-4 pt-3.5 pb-2.5" aria-label="Operation figures">
+                <Eyebrow className="text-foreground">Shift status · live</Eyebrow>
+                <dl className="mt-1">
+                  {figures.map(([label, value, zero]) => (
+                    <div key={label} className="flex items-end justify-between border-b py-1.5 last:border-b-0">
+                      <dt className="text-xs text-muted-foreground">{label}</dt>
+                      <dd className={cn("num text-sm font-semibold", zero && "text-success")}>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="num mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
+                  Understanding: {config?.llm === "live" ? `${config.models?.fast} and ${config.models?.smart}` : "offline rules"}.
+                  Memory: FalkorDB org_{me?.org}. {region.data?.area?.attribution}
+                </p>
+              </MapCard>
+            </div>
 
             <form
               className="absolute bottom-4 left-[322px] right-4 mx-auto flex h-12 max-w-[600px] items-center gap-2.5 rounded-full border bg-background pr-1.5 pl-4 shadow-md"

@@ -143,6 +143,8 @@ Google can take some minutes to apply a changed style.
 
 The dashboard sends a colour scheme (light or dark) to the map. The moon button in the top bar (**Night chart**) selects the dark variant. The sun button (**Day chart**) selects the light variant. If the Map ID has no dark style, the map stays light at night.
 
+> **Note:** The night chart is off for now. The dashboard always uses the day theme, and the moon button does not show. To turn it on again, set `NIGHT_MODE` to `true` in `frontend/src/components/ThemeToggle.tsx`.
+
 ## Add a detailed map (optional)
 
 The clean map hides shops, hotels and restaurants. Sometimes a coordinator needs them, for example to find a named shop in a report. A second Map ID gives a detailed map with all of Google's places.

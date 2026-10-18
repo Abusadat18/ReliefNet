@@ -1,8 +1,9 @@
-import { ArrowRightIcon, RouteIcon } from "lucide-react";
+import { ArrowRightIcon, Maximize2Icon, RouteIcon } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { needLabel } from "../hooks";
 import type { Trace, TraceEdge, TraceNode } from "../types";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
@@ -86,25 +87,6 @@ export function PathGraph({ trace, labels = false }: { trace: Trace; labels?: bo
           />
         );
       })}
-      {labels &&
-        trace.graph.edges.map((e, i) => {
-          const a = pos.get(e.from);
-          const b = pos.get(e.to);
-          if (!a || !b) return null;
-          // Between the columns, pulled toward the target row, so labels of edges that leave one node spread out.
-          const x = (a.x + b.x) / 2;
-          const y = a.y + (b.y - a.y) * 0.8;
-          const text = edgeLabel(e);
-          const w = text.length * 4.6 + 8;
-          return (
-            <g key={`l${i}`}>
-              <rect x={x - w / 2} y={y - 6} width={w} height={12} rx={3} fill="var(--background)" />
-              <text x={x} y={y + 3} textAnchor="middle" className="fill-primary font-mono text-[7.5px] font-semibold">
-                {text}
-              </text>
-            </g>
-          );
-        })}
       {trace.graph.nodes.map((n) => {
         const p = pos.get(n.id);
         if (!p) return null;
@@ -134,12 +116,68 @@ export function PathGraph({ trace, labels = false }: { trace: Trace; labels?: bo
           </g>
         );
       })}
+      {/* Labels after the nodes, so a node box never hides one. */}
+      {labels &&
+        trace.graph.edges.map((e, i) => {
+          const a = pos.get(e.from);
+          const b = pos.get(e.to);
+          if (!a || !b) return null;
+          // Between the columns, pulled toward the target row, so labels of edges that leave one node spread out.
+          // An edge within one row has no room between the boxes, so its label sits in the gap below the row.
+          const x = (a.x + b.x) / 2;
+          const y = Math.abs(a.y - b.y) < 1 ? a.y + 17 : a.y + (b.y - a.y) * 0.8;
+          const text = edgeLabel(e);
+          const w = text.length * 4.6 + 8;
+          return (
+            <g key={`l${i}`}>
+              <rect x={x - w / 2} y={y - 6} width={w} height={12} rx={3} fill="var(--background)" />
+              <text x={x} y={y + 3} textAnchor="middle" className="fill-primary font-mono text-[7.5px] font-semibold">
+                {text}
+              </text>
+            </g>
+          );
+        })}
     </svg>
   );
 }
 
 // FOR and MADE are structure, not decisions, so the chips leave them out.
 const QUIET_EDGES = new Set(["FOR", "MADE"]);
+
+/** The path graph as a button that opens it large, with edge labels, for a clear view. */
+function ExpandableGraph({ trace, labels = false }: { trace: Trace; labels?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const f = trace.family;
+  return (
+    <>
+      <button
+        type="button"
+        className="group relative block w-full cursor-zoom-in rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        onClick={() => setOpen(true)}
+        aria-label="Enlarge the graph"
+      >
+        <PathGraph trace={trace} labels={labels} />
+        <span className="num absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-background/90 px-2 py-0.5 text-[10px] text-muted-foreground opacity-70 shadow-sm transition-opacity group-hover:opacity-100">
+          <Maximize2Icon className="size-3" aria-hidden="true" />
+          Enlarge
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] gap-4 overflow-y-auto p-6 sm:max-w-[min(1100px,calc(100vw-4rem))]">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="text-[22px] font-normal tracking-tight">
+              {f.name || f.id} <span className="accent-serif">in the graph</span>
+            </DialogTitle>
+            <DialogDescription>
+              {f.id} · {trace.graph.nodes.length} nodes · {trace.graph.edges.length} edges, read from FalkorDB.
+            </DialogDescription>
+          </DialogHeader>
+          <PathGraph trace={trace} labels />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 function QueryTab({ trace, ms }: { trace: Trace; ms?: number }) {
   const id = trace.family.id;
@@ -188,7 +226,7 @@ function QueryTab({ trace, ms }: { trace: Trace; ms?: number }) {
       </section>
       <section className="flex flex-col gap-2">
         <SerifTitle as="h3" sans="Path with" serif="edge labels" className="text-[15px] font-medium" />
-        <PathGraph trace={trace} labels />
+        <ExpandableGraph trace={trace} labels />
       </section>
     </div>
   );
@@ -316,7 +354,7 @@ export function FamilyDrawer({ state, onTab, onAsk, onClose, onShowRoute }: Prop
                     <SerifTitle as="h3" sans="Path through" serif="shared memory" className="text-[15px] font-medium" />
                     <span className="num text-[10px] text-muted-foreground">FALKORDB</span>
                   </div>
-                  <PathGraph trace={trace} />
+                  <ExpandableGraph trace={trace} />
                 </section>
               )}
             </div>

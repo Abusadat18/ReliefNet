@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 const KEY = "reliefnet.theme";
+// The night theme is off for now: every page uses the day theme and the toggle is hidden.
+// Set this to true to bring the night chart back.
+const NIGHT_MODE = false;
 type Theme = "auto" | "day" | "night";
 
 function read(): Theme {
@@ -18,7 +21,7 @@ function isNight(t: Theme) {
 }
 
 export function applyStoredTheme() {
-  const t = read();
+  const t: Theme = NIGHT_MODE ? read() : "day";
   document.documentElement.classList.toggle("dark", isNight(t));
   // The map and the chart read data-theme; "auto" leaves them on the system setting.
   if (t === "auto") document.documentElement.removeAttribute("data-theme");
@@ -37,6 +40,7 @@ export function ThemeToggle() {
     applyStoredTheme();
   }, [theme]);
   const night = isNight(theme);
+  if (!NIGHT_MODE) return null;
   return (
     <Button
       variant="outline"
